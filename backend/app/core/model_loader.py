@@ -18,111 +18,103 @@ MODEL_DIR = os.path.join(BASE_DIR, "models")
 
 class ModelBundle:
     def __init__(self):
-        print(f"📦 Loading model bundle from: {MODEL_DIR}")
-        
+        print(f" Loading model bundle from: {MODEL_DIR}")
+
         # Load unified metadata
         try:
             with open(os.path.join(MODEL_DIR, "metadata.json")) as f:
                 self.metadata = json.load(f)
-            print("✅ Metadata loaded")
+            print(" Metadata loaded")
         except FileNotFoundError:
-            print("❌ metadata.json not found! Please train models first.")
+            print(" metadata.json not found! Please train models first.")
             raise
-        
+
         # Load shared components
         try:
             self.preprocessor = joblib.load(os.path.join(MODEL_DIR, "preprocessing.pkl"))
             self.target_encoder = joblib.load(os.path.join(MODEL_DIR, "target_encoder.pkl"))
             self.shap_background = joblib.load(os.path.join(MODEL_DIR, "shap_background.pkl"))
-            print("✅ Preprocessor and encoders loaded")
+            print(" Preprocessor and encoders loaded")
         except FileNotFoundError as e:
-            print(f"❌ Error loading preprocessor: {e}")
+            print(f" Error loading preprocessor: {e}")
             raise
-        
-        # Extract feature info from unified metadata structure
+
+        # Load ROC curve data (stored in a sibling file, not inside metadata.json)
+        try:
+            with open(os.path.join(MODEL_DIR, "roc_curves.json")) as f:
+                self.metadata["roc_curves"] = json.load(f)
+            print(" ROC curves loaded")
+        except FileNotFoundError:
+            self.metadata.setdefault("roc_curves", {})
+            print(" roc_curves.json not found")
+
+        # ------------------------------------------------------------------
+        # Extract feature info. The real metadata.json stores these at the
+        # TOP LEVEL, not nested under "dataset_info" (dataset_info only has
+        # n_samples/n_features/class_balance). We read top-level first and
+        # fall back to dataset_info/nested keys for older metadata formats.
+        # ------------------------------------------------------------------
         dataset_info = self.metadata.get("dataset_info", {})
-        best_model = self.metadata.get("best_model", {})
         all_models = self.metadata.get("all_models", [])
         model_files = self.metadata.get("model_files", {})
-        
-        # Extract feature info
-        self.feature_cols = dataset_info.get("feature_cols", [])
-        self.numeric_features = dataset_info.get("numeric_features", [])
-        self.categorical_features = dataset_info.get("categorical_features", [])
-        self.categorical_options = dataset_info.get("categorical_options", {})
-        self.target_classes = dataset_info.get("target_classes", [])
-        
-        # If not found in dataset_info, try top-level (for backward compatibility)
-        if not self.feature_cols:
-            self.feature_cols = self.metadata.get("feature_cols", [])
-        if not self.numeric_features:
-            self.numeric_features = self.metadata.get("numeric_features", [])
-        if not self.categorical_features:
-            self.categorical_features = self.metadata.get("categorical_features", [])
-        if not self.categorical_options:
-            self.categorical_options = self.metadata.get("categorical_options", {})
-        if not self.target_classes:
-            self.target_classes = self.metadata.get("target_classes", [])
-        
+
+        self.feature_cols = self.metadata.get("feature_cols") or dataset_info.get("feature_cols", [])
+        self.numeric_features = self.metadata.get("numeric_features") or dataset_info.get("numeric_features", [])
+        self.categorical_features = self.metadata.get("categorical_features") or dataset_info.get("categorical_features", [])
+        self.categorical_options = self.metadata.get("categorical_options") or dataset_info.get("categorical_options", {})
+        self.target_classes = self.metadata.get("target_classes") or dataset_info.get("target_classes", [])
+
         # Load encoded feature names for SHAP
         try:
             with open(os.path.join(MODEL_DIR, "encoded_feature_names.json")) as f:
                 self.encoded_feature_names = json.load(f)
         except FileNotFoundError:
-            print("⚠️ encoded_feature_names.json not found, using feature_cols")
+            print(" encoded_feature_names.json not found, using feature_cols")
             self.encoded_feature_names = self.feature_cols
-        
-        # Extract best model info - safely handle None values
-        self.best_model_name = "Unknown"
-        if best_model and isinstance(best_model, dict):
-            self.best_model_name = best_model.get("name", "Unknown")
-        elif self.metadata:
-            self.best_model_name = self.metadata.get("best_model_name", "Unknown")
-        
-        # Ensure best_model_name is a string
+
+        # ------------------------------------------------------------------
+        # Extract best-model info. Real metadata.json stores these as flat
+        # top-level keys (best_model_name, model_type, is_keras,
+        # best_model_metrics, confusion_matrix). An older/alternate format
+        # nests them under a "best_model" dict — support both.
+        # ------------------------------------------------------------------
+        legacy_best_model = self.metadata.get("best_model")
+        legacy_best_model = legacy_best_model if isinstance(legacy_best_model, dict) else {}
+
+        self.best_model_name = legacy_best_model.get("name") or self.metadata.get("best_model_name") or "Unknown"
         if self.best_model_name is None:
             self.best_model_name = "Unknown"
-        
-        self.is_keras = False
-        if best_model and isinstance(best_model, dict):
-            self.is_keras = best_model.get("is_keras", False)
-        elif self.metadata:
-            self.is_keras = self.metadata.get("is_keras_model", False)
-        
-        self.best_model_metrics = {}
-        if best_model and isinstance(best_model, dict):
-            self.best_model_metrics = best_model.get("metrics", {})
-        elif self.metadata:
-            self.best_model_metrics = self.metadata.get("best_model_metrics", {})
-        
-        # Build available_models dict from all_models and model_files
+
+        self.is_keras = legacy_best_model.get(
+            "is_keras",
+            self.metadata.get("is_keras", self.metadata.get("is_keras_model", False)),
+        )
+
+        self.best_model_metrics = legacy_best_model.get("metrics") or self.metadata.get("best_model_metrics", {})
+        self.confusion_matrix = legacy_best_model.get("confusion_matrix") or self.metadata.get("confusion_matrix", [])
+        self.best_model_type = legacy_best_model.get("type") or self.metadata.get("model_type", "Unknown")
+
+        # ------------------------------------------------------------------
+        # Build available_models from all_models + model_files.
+        # NOTE: each entry in all_models uses "model" (not "model_name") and
+        # "type" (not "model_type") as its keys, e.g.:
+        #   {"model": "Random Forest", "type": "ML", "accuracy": ..., ...}
+        # ------------------------------------------------------------------
         self.available_models = {}
         for model_entry in all_models:
             if not isinstance(model_entry, dict):
                 continue
-                
-            model_name = model_entry.get("model_name")
-            # Skip if model_name is None
+
+            model_name = model_entry.get("model") or model_entry.get("model_name")
             if model_name is None:
                 continue
-                
-            model_file = model_entry.get("model_file", "")
-            model_type = model_entry.get("model_type", "sklearn")
-            is_keras = model_type == "keras"
-            
-            # Find matching file info
-            file_info = model_files.get(model_name, {}) if model_files else {}
-            model_path = file_info.get("path", os.path.join("all_models", model_file))
-            
-            # Determine key from name - safely handle None
-            if model_name is None:
-                continue
-            
-            # Create safe key
+
+            model_type = model_entry.get("type") or model_entry.get("model_type") or "ML"
+            is_keras = model_type == "DL" or "keras" in model_name.lower() or "ann" in model_name.lower()
+
+            # Derive a simple, stable key from the model name
             model_key = model_name.lower().replace(" ", "_").replace("(", "").replace(")", "")
-            
-            # Map to simpler keys
-            if "_ann" in model_key or "neural_network" in model_key:
+            if "ann" in model_key or "neural_network" in model_key:
                 model_key = "ann"
             elif "random_forest" in model_key:
                 model_key = "random_forest"
@@ -138,161 +130,150 @@ class ModelBundle:
                 model_key = "gradient_boosting"
             elif "knn" in model_key:
                 model_key = "knn"
-            
-            # Check if this is the best model
-            is_best = False
-            if self.best_model_name and model_name:
-                is_best = model_name == self.best_model_name
-            elif self.best_model_name and model_key:
-                is_best = model_key == self.best_model_name.lower().replace(" ", "_")
-            
+
+            # Resolve file path with proper None handling
+            if is_keras:
+                # Check for keras model file
+                model_path = model_files.get("best_model_keras")
+                if not model_path:
+                    # Look for any .keras file in the models directory
+                    keras_files = [f for f in os.listdir(MODEL_DIR) if f.endswith('.keras')]
+                    if keras_files:
+                        model_path = keras_files[0]
+                        print(f"   Found Keras model: {model_path}")
+                    else:
+                        # Try default name
+                        default_keras = "best_model.keras"
+                        if os.path.exists(os.path.join(MODEL_DIR, default_keras)):
+                            model_path = default_keras
+                        else:
+                            print(f"    No Keras model file found for {model_name}, skipping")
+                            continue  # Skip this model entirely
+            else:
+                # Check for ML model file
+                model_path = model_files.get(model_key)
+                if not model_path:
+                    # Try different naming conventions
+                    fallback_name = model_name.replace(" ", "_")
+                    possible_paths = [
+                        os.path.join("all_models", f"{fallback_name}.pkl"),
+                        f"{fallback_name}.pkl",
+                        os.path.join("all_models", f"{model_key}.pkl"),
+                        f"{model_key}.pkl"
+                    ]
+                    for path in possible_paths:
+                        if os.path.exists(os.path.join(MODEL_DIR, path)):
+                            model_path = path
+                            break
+                    if not model_path:
+                        print(f"    Could not find model file for {model_name}, skipping")
+                        continue  # Skip this model entirely
+
+            is_best = model_name == self.best_model_name
+
             self.available_models[model_key] = {
                 "name": model_name,
                 "type": model_type,
                 "is_keras": is_keras,
                 "path": model_path,
                 "metrics": model_entry,
-                "is_best": is_best
+                "is_best": is_best,
             }
-        
-        # Also check for models in metadata top-level
+
+        # Backward compatibility: some older metadata formats keep a
+        # top-level "available_models" dict instead of "all_models".
         if not self.available_models:
-            # Try to get from top-level available_models
             avail_models = self.metadata.get("available_models", {})
-            if avail_models:
-                for model_key, model_info in avail_models.items():
-                    if isinstance(model_info, dict):
-                        model_name = model_info.get("name", model_key)
-                        # Skip None values
-                        if model_name is None:
-                            continue
-                        self.available_models[model_key] = {
-                            "name": model_name,
-                            "type": model_info.get("type", "ML"),
-                            "is_keras": model_info.get("is_keras", False),
-                            "path": model_info.get("path", ""),
-                            "metrics": model_info.get("metrics", {}),
-                            "is_best": model_key == self.metadata.get("best_model_key", "")
-                        }
-        
-        # Load all available models
+            for model_key, model_info in avail_models.items():
+                if not isinstance(model_info, dict):
+                    continue
+                model_name = model_info.get("name", model_key)
+                if model_name is None:
+                    continue
+                # Skip if path is None
+                model_path = model_info.get("path", "")
+                if not model_path:
+                    print(f"    No file path for {model_name}, skipping")
+                    continue
+                self.available_models[model_key] = {
+                    "name": model_name,
+                    "type": model_info.get("type", "ML"),
+                    "is_keras": model_info.get("is_keras", False),
+                    "path": model_path,
+                    "metrics": model_info.get("metrics", {}),
+                    "is_best": model_key == self.metadata.get("best_model_key", ""),
+                }
+
+        # ------------------------------------------------------------------
+        # Load every model referenced in available_models.
+        # ------------------------------------------------------------------
         self.models = {}
-        print("\n📊 Loading models:")
-        
-        # Also check for individual model files
-        individual_models = {
-            "best_model.pkl": "best",
-            "xgb_model.pkl": "xgboost",
-            "random_forest_model.pkl": "random_forest",
-            "lgbm_model.pkl": "lightgbm",
-            "logistic_regression.pkl": "logistic_regression",
-            "svm_model.pkl": "svm",
-            "gradient_boosting.pkl": "gradient_boosting",
-            "knn_model.pkl": "knn"
-        }
-        
-        # First load individual model files
-        for filename, key in individual_models.items():
-            filepath = os.path.join(MODEL_DIR, filename)
-            if os.path.exists(filepath):
-                try:
-                    self.models[key] = joblib.load(filepath)
-                    if key not in self.available_models:
-                        self.available_models[key] = {
-                            "name": key.replace("_", " ").title(),
-                            "type": "sklearn",
-                            "is_keras": False,
-                            "path": filename,
-                            "metrics": {},
-                            "is_best": key == "best"
-                        }
-                    print(f"   ✅ Loaded ML model: {key}")
-                except Exception as e:
-                    print(f"   ⚠️ Could not load {filename}: {e}")
-                    self.models[key] = None
-        
-        # Then load from all_models directory
-        all_models_dir = os.path.join(MODEL_DIR, "all_models")
-        if os.path.exists(all_models_dir):
-            for file in os.listdir(all_models_dir):
-                if file.endswith(".pkl"):
-                    model_key = file.replace(".pkl", "")
-                    # Skip if already loaded
-                    if model_key in self.models and self.models[model_key] is not None:
-                        continue
-                    try:
-                        filepath = os.path.join(all_models_dir, file)
-                        self.models[model_key] = joblib.load(filepath)
-                        print(f"   ✅ Loaded ML model: {model_key}")
-                    except Exception as e:
-                        print(f"   ⚠️ Could not load {file}: {e}")
-                        self.models[model_key] = None
-        
-        # Load from available_models
+        print("\n Loading models:")
         for model_key, model_info in self.available_models.items():
-            if model_key in self.models and self.models[model_key] is not None:
+            # Skip if path is None or empty
+            if not model_info.get("path"):
+                print(f"    No file path specified for {model_info.get('name', model_key)}")
+                self.models[model_key] = None
                 continue
+
+            model_path = os.path.join(MODEL_DIR, model_info["path"])
+            
+            # If file doesn't exist at the specified path, try alternative locations
+            if not os.path.exists(model_path):
+                alt_paths = [
+                    os.path.join(MODEL_DIR, "all_models", f"{model_key}.pkl"),
+                    os.path.join(MODEL_DIR, f"{model_key}.pkl"),
+                    os.path.join(MODEL_DIR, "all_models", f"{model_info['name'].replace(' ', '_')}.pkl"),
+                ]
+                found = False
+                for alt in alt_paths:
+                    if os.path.exists(alt):
+                        model_path = alt
+                        found = True
+                        break
+                if not found:
+                    print(f"    Model file not found: {model_info['path']}")
+                    self.models[model_key] = None
+                    continue
+
             try:
-                model_path = os.path.join(MODEL_DIR, model_info["path"])
-                if not os.path.exists(model_path):
-                    # Try in all_models directory
-                    alt_path = os.path.join(MODEL_DIR, "all_models", f"{model_key}.pkl")
-                    if os.path.exists(alt_path):
-                        model_path = alt_path
-                    else:
-                        print(f"   ⚠️ Model file not found: {model_info['path']}")
-                        continue
-                
                 if model_info.get("is_keras", False):
-                    try:
-                        from tensorflow import keras
-                        self.models[model_key] = keras.models.load_model(model_path, compile=False)
-                        self.models[model_key].compile(
-                            optimizer='adam',
-                            loss='binary_crossentropy',
-                            metrics=['accuracy']
-                        )
-                        print(f"   ✅ Loaded Keras model: {model_info['name']}")
-                    except Exception as e:
-                        print(f"   ❌ Could not load Keras model {model_info['name']}: {e}")
-                        self.models[model_key] = None
+                    from tensorflow import keras
+                    self.models[model_key] = keras.models.load_model(model_path, compile=False)
+                    self.models[model_key].compile(
+                        optimizer="adam",
+                        loss="binary_crossentropy",
+                        metrics=["accuracy"],
+                    )
+                    print(f"    Loaded Keras model: {model_info['name']}")
                 else:
                     self.models[model_key] = joblib.load(model_path)
-                    print(f"   ✅ Loaded ML model: {model_info['name']}")
+                    print(f"    Loaded ML model: {model_info['name']}")
             except Exception as e:
-                print(f"   ❌ Could not load {model_info.get('name', model_key)}: {e}")
+                print(f"    Could not load {model_info.get('name', model_key)}: {e}")
                 self.models[model_key] = None
-        
-        # Find best model key
+
+        # ------------------------------------------------------------------
+        # Determine the best model key: prefer the entry flagged is_best that
+        # actually loaded successfully, otherwise fall back to the first
+        # successfully loaded model.
+        # ------------------------------------------------------------------
         self.best_model_key = None
-        
-        # First try to find by best_model_name
-        if self.best_model_name and self.best_model_name != "Unknown":
-            # Try to find matching model
-            for key, model in self.models.items():
-                if model is not None:
-                    # Check if key matches best model name
-                    if key == self.best_model_name.lower().replace(" ", "_").replace("(", "").replace(")", ""):
-                        self.best_model_key = key
-                        break
-                    # Check if model info has matching name
-                    if key in self.available_models:
-                        info = self.available_models[key]
-                        if info.get("name") == self.best_model_name:
-                            self.best_model_key = key
-                            break
-        
-        # If best model not found, use first available
+        for key, info in self.available_models.items():
+            if info.get("is_best") and self.models.get(key) is not None:
+                self.best_model_key = key
+                break
+
         if self.best_model_key is None:
-            for key in self.models.keys():
+            for key in self.models:
                 if self.models.get(key) is not None:
                     self.best_model_key = key
                     break
-        
-        # If still None, use 'best' if available
-        if self.best_model_key is None and 'best' in self.models and self.models['best'] is not None:
-            self.best_model_key = 'best'
-        
+
+        # Keep is_keras in sync with whichever model actually ended up "best"
+        if self.best_model_key and self.best_model_key in self.available_models:
+            self.is_keras = self.available_models[self.best_model_key].get("is_keras", self.is_keras)
+
         # Initialize SHAP explainer
         self.explainer = None
         try:
@@ -308,22 +289,22 @@ class ModelBundle:
                             except AttributeError:
                                 # Some models might not have predict_proba
                                 return best_model.predict(X)
-                    
+
                     bg_sample = self.shap_background[:50] if len(self.shap_background) > 50 else self.shap_background
                     self.explainer = shap.Explainer(
                         predict_fn,
                         bg_sample,
                         feature_names=self.encoded_feature_names,
                     )
-                    print("✅ SHAP explainer initialized")
+                    print(" SHAP explainer initialized")
                 else:
-                    print("⚠️ Best model is None, SHAP explainer not initialized")
+                    print(" Best model is None, SHAP explainer not initialized")
             else:
-                print("⚠️ No best model found, SHAP explainer not initialized")
+                print(" No best model found, SHAP explainer not initialized")
         except Exception as e:
-            print(f"⚠️ Could not initialize SHAP explainer: {e}")
+            print(f" Could not initialize SHAP explainer: {e}")
             self.explainer = None
-        
+
         # Get best model name for display
         display_name = self.best_model_name
         if display_name == "Unknown" and self.best_model_key:
@@ -331,10 +312,10 @@ class ModelBundle:
                 display_name = self.available_models[self.best_model_key].get("name", self.best_model_key)
             else:
                 display_name = self.best_model_key
-        
-        print(f"\n✅ Best model: {display_name}")
+
+        print(f"\n Best model: {display_name}")
         available = [k for k, v in self.models.items() if v is not None]
-        print(f"✅ Available models: {available}")
+        print(f" Available models: {available}")
 
     def _row_to_dataframe(self, patient: dict) -> pd.DataFrame:
         """Convert patient dict to DataFrame with correct column order."""
@@ -357,27 +338,27 @@ class ModelBundle:
         """Get SHAP explanation for a prediction."""
         shap_factors = []
         explanation_strings = []
-        
+
         if self.explainer is None:
             return {"shap_factors": [], "explanation": ["SHAP explanation not available"]}
-        
+
         try:
             shap_values = self.explainer(X_dense)
             values = shap_values.values[0]
-            
+
             grouped = {}
             for enc_name, val in zip(self.encoded_feature_names, values):
                 if enc_name in self.numeric_features:
                     original = enc_name
                 else:
                     original = next(
-                        (c for c in self.categorical_features if enc_name.startswith(c + "_")), 
+                        (c for c in self.categorical_features if enc_name.startswith(c + "_")),
                         enc_name
                     )
                 grouped[original] = grouped.get(original, 0.0) + float(val)
-            
+
             ranked = sorted(grouped.items(), key=lambda kv: abs(kv[1]), reverse=True)
-            
+
             for feature, impact in ranked[:6]:
                 direction = "increases" if impact > 0 else "decreases"
                 shap_factors.append({
@@ -387,11 +368,11 @@ class ModelBundle:
                 })
                 verb = "Increases" if impact > 0 else "Reduces"
                 explanation_strings.append(f"{verb} risk: {feature}")
-            
+
         except Exception as e:
-            print(f"⚠️ SHAP explanation failed: {e}")
+            print(f" SHAP explanation failed: {e}")
             explanation_strings.append("SHAP explanation temporarily unavailable")
-        
+
         return {
             "shap_factors": shap_factors,
             "explanation": explanation_strings
@@ -403,20 +384,20 @@ class ModelBundle:
             model_key = self.best_model_key
         else:
             model_key = model_choice
-        
+
         if model_key is None or model_key not in self.models or self.models[model_key] is None:
             available = [k for k, v in self.models.items() if v is not None]
             raise ValueError(f"Model '{model_key}' not available. Available: {available}")
-        
+
         model = self.models[model_key]
         model_info = self.available_models.get(model_key, {})
         model_name = model_info.get("name", model_key)
         is_keras = model_info.get("is_keras", False)
-        
+
         X_df = self._row_to_dataframe(patient)
         X_t = self.preprocessor.transform(X_df)
         X_dense = self._to_dense(X_t)
-        
+
         try:
             if is_keras:
                 prob_yes = float(model.predict(X_dense, verbose=0)[0][0])
@@ -424,11 +405,11 @@ class ModelBundle:
                 prob_yes = float(model.predict_proba(X_dense)[0][1])
         except Exception as e:
             raise RuntimeError(f"Prediction failed: {e}")
-        
+
         prob_no = 1.0 - prob_yes
         pred_idx = int(prob_yes >= 0.5)
         pred_label = self.target_encoder.inverse_transform([pred_idx])[0]
-        
+
         max_prob = max(prob_yes, prob_no)
         if max_prob >= 0.85:
             confidence = "High"
@@ -436,19 +417,24 @@ class ModelBundle:
             confidence = "Medium"
         else:
             confidence = "Low"
-        
+
         shap_result = self._get_shap_explanation(X_dense, model_key)
-        
+
+        # Build value-annotated explanation strings directly from shap_factors
+        # (each factor already knows its own feature name and direction) rather
+        # than re-matching against the rendered strings, since short feature
+        # names like "T"/"N"/"M" would otherwise substring-match unrelated
+        # lines (e.g. "T" matching inside "Thyroid Function").
         explanation_with_values = []
-        for item in shap_result["explanation"]:
-            for factor in shap_result["shap_factors"]:
-                if factor["feature"] in item:
-                    patient_value = patient.get(factor["feature"], "N/A")
-                    explanation_with_values.append(f"{item} (value: {patient_value})")
-                    break
-            else:
-                explanation_with_values.append(item)
-        
+        for factor in shap_result["shap_factors"]:
+            verb = "Increases" if factor["direction"] == "increases" else "Reduces"
+            patient_value = patient.get(factor["feature"], "N/A")
+            explanation_with_values.append(
+                f"{verb} risk: {factor['feature']} (value: {patient_value})"
+            )
+        if not explanation_with_values:
+            explanation_with_values = list(shap_result["explanation"])
+
         return {
             "prediction": str(pred_label),
             "probability": round(prob_yes, 4),
@@ -470,7 +456,7 @@ class ModelBundle:
             if self.models.get(key) is not None:
                 # Get metrics from the model entry
                 metrics = info.get("metrics", {})
-                
+
                 # Ensure all required fields are present
                 models_list.append({
                     "key": key,

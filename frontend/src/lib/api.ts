@@ -141,7 +141,7 @@ export async function getExplanation(
 export async function getFeatureImportance(modelKey: string = "best"): Promise<{
   features: { feature: string; importance: number }[];
 }> {
-  const { data } = await client.get(`/api/features/importance?model=${modelKey}`);
+  const { data } = await client.get(`/api/features/importance?model_key=${modelKey}`);
   return data;
 }
 

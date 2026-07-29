@@ -1,15 +1,15 @@
 {
-  "best_model": "Neural Network (Keras ANN)",
+  "best_model": "Random Forest",
   "best_model_metrics": {
-    "model": "Neural Network (Keras ANN)",
-    "type": "DL",
-    "cv_roc_auc_mean": null,
-    "cv_roc_auc_std": null,
-    "accuracy": 0.974026,
+    "model": "Random Forest",
+    "type": "ML",
+    "cv_roc_auc_mean": 0.990909,
+    "cv_roc_auc_std": 0.008084,
+    "accuracy": 0.961039,
     "precision": 1.0,
-    "recall": 0.909091,
-    "f1": 0.952381,
-    "roc_auc": 0.995868
+    "recall": 0.863636,
+    "f1": 0.926829,
+    "roc_auc": 0.995041
   },
   "selection_priority": [
     "roc_auc",
@@ -103,7 +103,7 @@
       "precision": 1.0,
       "recall": 0.909091,
       "f1": 0.952381,
-      "roc_auc": 0.995868
+      "roc_auc": 0.990083
     }
   ]
 }

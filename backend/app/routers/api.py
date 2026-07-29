@@ -234,15 +234,12 @@ def best_model():
     try:
         bundle = get_bundle()
         
-        # Get best model info from metadata
-        best_model_data = bundle.metadata.get("best_model", {})
-        
         response = {
             "key": str(bundle.best_model_key) if bundle.best_model_key else None,
             "name": str(bundle.best_model_name),
-            "type": str(best_model_data.get("type", "ML")),
+            "type": str(getattr(bundle, "best_model_type", "ML")),
             "is_keras": bool(bundle.is_keras),
-            "metrics": best_model_data.get("metrics", {})
+            "metrics": bundle.best_model_metrics
         }
         return clean_for_json(response)
     except Exception as e:
@@ -424,18 +421,16 @@ def model_info():
         bundle = get_bundle()
         metadata = bundle.metadata
         
-        # Get best model data
-        best_model_data = metadata.get("best_model", {})
         dataset_info = metadata.get("dataset_info", {})
         
         response = {
             "best_model": str(bundle.best_model_name),
-            "best_model_type": str(best_model_data.get("type", "Unknown")),
+            "best_model_type": str(getattr(bundle, "best_model_type", "Unknown")),
             "selection_priority": metadata.get("selection_priority", ["roc_auc", "f1", "recall"]),
             "all_models": metadata.get("all_models", []),
-            "best_model_metrics": best_model_data.get("metrics", {}),
+            "best_model_metrics": bundle.best_model_metrics,
             "roc_curves": metadata.get("roc_curves", {}),
-            "confusion_matrix": best_model_data.get("confusion_matrix", []),
+            "confusion_matrix": getattr(bundle, "confusion_matrix", []),
             "target_classes": bundle.target_classes,
             "dataset_info": dataset_info,
         }
