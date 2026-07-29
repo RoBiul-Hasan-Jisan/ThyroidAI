@@ -1,0 +1,384 @@
+{
+  "best_model_name": "Neural Network (Keras ANN)",
+  "best_model_type": "DL",
+  "is_keras_model": true,
+  "feature_cols": [
+    "Age",
+    "Gender",
+    "Smoking",
+    "Hx Smoking",
+    "Hx Radiothreapy",
+    "Thyroid Function",
+    "Physical Examination",
+    "Adenopathy",
+    "Pathology",
+    "Focality",
+    "Risk",
+    "T",
+    "N",
+    "M",
+    "Stage",
+    "Response"
+  ],
+  "numeric_features": [
+    "Age"
+  ],
+  "categorical_features": [
+    "Gender",
+    "Smoking",
+    "Hx Smoking",
+    "Hx Radiothreapy",
+    "Thyroid Function",
+    "Physical Examination",
+    "Adenopathy",
+    "Pathology",
+    "Focality",
+    "Risk",
+    "T",
+    "N",
+    "M",
+    "Stage",
+    "Response"
+  ],
+  "categorical_options": {
+    "Gender": [
+      "F",
+      "M"
+    ],
+    "Smoking": [
+      "No",
+      "Yes"
+    ],
+    "Hx Smoking": [
+      "No",
+      "Yes"
+    ],
+    "Hx Radiothreapy": [
+      "No",
+      "Yes"
+    ],
+    "Thyroid Function": [
+      "Clinical Hyperthyroidism",
+      "Clinical Hypothyroidism",
+      "Euthyroid",
+      "Subclinical Hyperthyroidism",
+      "Subclinical Hypothyroidism"
+    ],
+    "Physical Examination": [
+      "Diffuse goiter",
+      "Multinodular goiter",
+      "Normal",
+      "Single nodular goiter-left",
+      "Single nodular goiter-right"
+    ],
+    "Adenopathy": [
+      "Bilateral",
+      "Extensive",
+      "Left",
+      "No",
+      "Posterior",
+      "Right"
+    ],
+    "Pathology": [
+      "Follicular",
+      "Hurthel cell",
+      "Micropapillary",
+      "Papillary"
+    ],
+    "Focality": [
+      "Multi-Focal",
+      "Uni-Focal"
+    ],
+    "Risk": [
+      "High",
+      "Intermediate",
+      "Low"
+    ],
+    "T": [
+      "T1a",
+      "T1b",
+      "T2",
+      "T3a",
+      "T3b",
+      "T4a",
+      "T4b"
+    ],
+    "N": [
+      "N0",
+      "N1a",
+      "N1b"
+    ],
+    "M": [
+      "M0",
+      "M1"
+    ],
+    "Stage": [
+      "I",
+      "II",
+      "III",
+      "IVA",
+      "IVB"
+    ],
+    "Response": [
+      "Biochemical Incomplete",
+      "Excellent",
+      "Indeterminate",
+      "Structural Incomplete"
+    ]
+  },
+  "target_classes": [
+    "No",
+    "Yes"
+  ],
+  "dataset_info": {
+    "n_samples": 383,
+    "n_features": 16,
+    "class_balance": {
+      "No": 275,
+      "Yes": 108
+    }
+  },
+  "confusion_matrix": [
+    [
+      54,
+      1
+    ],
+    [
+      2,
+      20
+    ]
+  ],
+  "available_models": {
+    "random_forest": {
+      "name": "Random Forest",
+      "type": "ML",
+      "path": "all_models/Random_Forest.pkl",
+      "is_keras": false,
+      "metrics": {
+        "model": "Random Forest",
+        "type": "ML",
+        "cv_roc_auc_mean": 0.9909,
+        "cv_roc_auc_std": 0.0081,
+        "accuracy": 0.961,
+        "precision": 1.0,
+        "recall": 0.8636,
+        "f1": 0.9268,
+        "roc_auc": 0.995
+      }
+    },
+    "xgboost": {
+      "name": "XGBoost",
+      "type": "ML",
+      "path": "xgb_model.pkl",
+      "is_keras": false,
+      "metrics": {
+        "model": "XGBoost",
+        "type": "ML",
+        "cv_roc_auc_mean": 0.9834,
+        "cv_roc_auc_std": 0.0176,
+        "accuracy": 0.961,
+        "precision": 0.913,
+        "recall": 0.9545,
+        "f1": 0.9333,
+        "roc_auc": 0.9917
+      }
+    },
+    "ann": {
+      "name": "Neural Network (Keras ANN)",
+      "type": "DL",
+      "path": "ann_model.keras",
+      "is_keras": true,
+      "metrics": {
+        "model": "Neural Network (Keras ANN)",
+        "type": "DL",
+        "cv_roc_auc_mean": null,
+        "cv_roc_auc_std": null,
+        "accuracy": 0.961,
+        "precision": 0.9524,
+        "recall": 0.9091,
+        "f1": 0.9302,
+        "roc_auc": 0.995
+      }
+    },
+    "logistic_regression": {
+      "name": "Logistic Regression",
+      "type": "ML",
+      "path": "all_models/Logistic_Regression.pkl",
+      "is_keras": false,
+      "metrics": {
+        "model": "Logistic Regression",
+        "type": "ML",
+        "cv_roc_auc_mean": 0.9826,
+        "cv_roc_auc_std": 0.0192,
+        "accuracy": 0.961,
+        "precision": 0.9524,
+        "recall": 0.9091,
+        "f1": 0.9302,
+        "roc_auc": 0.9917
+      }
+    },
+    "svm": {
+      "name": "SVM",
+      "type": "ML",
+      "path": "all_models/SVM.pkl",
+      "is_keras": false,
+      "metrics": {
+        "model": "SVM",
+        "type": "ML",
+        "cv_roc_auc_mean": 0.9829,
+        "cv_roc_auc_std": 0.021,
+        "accuracy": 0.961,
+        "precision": 0.9524,
+        "recall": 0.9091,
+        "f1": 0.9302,
+        "roc_auc": 0.9843
+      }
+    },
+    "gradient_boosting": {
+      "name": "Gradient Boosting",
+      "type": "ML",
+      "path": "all_models/Gradient_Boosting.pkl",
+      "is_keras": false,
+      "metrics": {
+        "model": "Gradient Boosting",
+        "type": "ML",
+        "cv_roc_auc_mean": 0.9848,
+        "cv_roc_auc_std": 0.0124,
+        "accuracy": 0.961,
+        "precision": 1.0,
+        "recall": 0.8636,
+        "f1": 0.9268,
+        "roc_auc": 0.9851
+      }
+    },
+    "lightgbm": {
+      "name": "LightGBM",
+      "type": "ML",
+      "path": "all_models/LightGBM.pkl",
+      "is_keras": false,
+      "metrics": {
+        "model": "LightGBM",
+        "type": "ML",
+        "cv_roc_auc_mean": 0.9826,
+        "cv_roc_auc_std": 0.0118,
+        "accuracy": 0.9481,
+        "precision": 0.875,
+        "recall": 0.9545,
+        "f1": 0.913,
+        "roc_auc": 0.9934
+      }
+    },
+    "knn": {
+      "name": "KNN",
+      "type": "ML",
+      "path": "all_models/KNN.pkl",
+      "is_keras": false,
+      "metrics": {
+        "model": "KNN",
+        "type": "ML",
+        "cv_roc_auc_mean": 0.9539,
+        "cv_roc_auc_std": 0.0344,
+        "accuracy": 0.9481,
+        "precision": 0.95,
+        "recall": 0.8636,
+        "f1": 0.9048,
+        "roc_auc": 0.9851
+      }
+    }
+  },
+  "selection_priority": [
+    "roc_auc",
+    "f1",
+    "recall"
+  ],
+  "all_model_metrics": [
+    {
+      "model": "Neural Network (Keras ANN)",
+      "type": "DL",
+      "cv_roc_auc_mean": null,
+      "cv_roc_auc_std": null,
+      "accuracy": 0.961,
+      "precision": 0.9524,
+      "recall": 0.9091,
+      "f1": 0.9302,
+      "roc_auc": 0.995
+    },
+    {
+      "model": "Random Forest",
+      "type": "ML",
+      "cv_roc_auc_mean": 0.9909,
+      "cv_roc_auc_std": 0.0081,
+      "accuracy": 0.961,
+      "precision": 1.0,
+      "recall": 0.8636,
+      "f1": 0.9268,
+      "roc_auc": 0.995
+    },
+    {
+      "model": "LightGBM",
+      "type": "ML",
+      "cv_roc_auc_mean": 0.9826,
+      "cv_roc_auc_std": 0.0118,
+      "accuracy": 0.9481,
+      "precision": 0.875,
+      "recall": 0.9545,
+      "f1": 0.913,
+      "roc_auc": 0.9934
+    },
+    {
+      "model": "XGBoost",
+      "type": "ML",
+      "cv_roc_auc_mean": 0.9834,
+      "cv_roc_auc_std": 0.0176,
+      "accuracy": 0.961,
+      "precision": 0.913,
+      "recall": 0.9545,
+      "f1": 0.9333,
+      "roc_auc": 0.9917
+    },
+    {
+      "model": "Logistic Regression",
+      "type": "ML",
+      "cv_roc_auc_mean": 0.9826,
+      "cv_roc_auc_std": 0.0192,
+      "accuracy": 0.961,
+      "precision": 0.9524,
+      "recall": 0.9091,
+      "f1": 0.9302,
+      "roc_auc": 0.9917
+    },
+    {
+      "model": "Gradient Boosting",
+      "type": "ML",
+      "cv_roc_auc_mean": 0.9848,
+      "cv_roc_auc_std": 0.0124,
+      "accuracy": 0.961,
+      "precision": 1.0,
+      "recall": 0.8636,
+      "f1": 0.9268,
+      "roc_auc": 0.9851
+    },
+    {
+      "model": "KNN",
+      "type": "ML",
+      "cv_roc_auc_mean": 0.9539,
+      "cv_roc_auc_std": 0.0344,
+      "accuracy": 0.9481,
+      "precision": 0.95,
+      "recall": 0.8636,
+      "f1": 0.9048,
+      "roc_auc": 0.9851
+    },
+    {
+      "model": "SVM",
+      "type": "ML",
+      "cv_roc_auc_mean": 0.9829,
+      "cv_roc_auc_std": 0.021,
+      "accuracy": 0.961,
+      "precision": 0.9524,
+      "recall": 0.9091,
+      "f1": 0.9302,
+      "roc_auc": 0.9843
+    }
+  ]
+}

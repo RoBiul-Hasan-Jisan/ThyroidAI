@@ -1,0 +1,12 @@
+fastapi==0.140.9
+uvicorn[standard]
+pydantic>=2
+python-multipart
+scikit-learn
+pandas
+numpy
+xgboost
+lightgbm
+tensorflow-cpu
+shap
+joblib
