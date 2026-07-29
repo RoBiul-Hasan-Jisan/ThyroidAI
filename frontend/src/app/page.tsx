@@ -9,7 +9,7 @@ import { getModelInfo } from "@/lib/api";
 import { ModelInfoResponse } from "@/lib/types";
 import {
   Database, GitBranch, Cpu, ShieldCheck, ArrowRight,
-  Microscope, Layers, Sparkles,
+  Microscope, Layers, Sparkles, Loader2,
 } from "lucide-react";
 
 const WORKFLOW_STEPS = [
@@ -23,12 +23,39 @@ const WORKFLOW_STEPS = [
 
 export default function HomePage() {
   const [info, setInfo] = useState<ModelInfoResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getModelInfo().then(setInfo).catch(() => {});
+    getModelInfo()
+      .then(setInfo)
+      .catch((err) => {
+        console.error("Error loading model info:", err);
+        setError("Failed to load model performance data.");
+      })
+      .finally(() => setLoading(false));
   }, []);
 
+  // Safe metric formatting helper
+  const formatMetric = (value: any, decimals: number = 3) => {
+    if (value === undefined || value === null || isNaN(value)) {
+      return "—";
+    }
+    return value.toFixed(decimals);
+  };
+
+  const formatPercent = (value: any) => {
+    if (value === undefined || value === null || isNaN(value)) {
+      return "—";
+    }
+    return `${(value * 100).toFixed(1)}%`;
+  };
+
   const best = info?.best_model_metrics;
+  const bestModelName = info?.best_model || "—";
+
+  // Check if metrics are available
+  const hasMetrics = best && best.accuracy !== undefined && best.accuracy !== null;
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-14">
@@ -71,16 +98,37 @@ export default function HomePage() {
               <CardDescription>Best-performing model, held-out test set</CardDescription>
             </CardHeader>
             <CardContent>
-              {best ? (
+              {loading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+                  <span className="ml-3 text-slate-500">Loading metrics…</span>
+                </div>
+              ) : error ? (
+                <div className="text-center py-8 text-slate-500">
+                  <p className="text-sm">{error}</p>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="mt-3"
+                    onClick={() => window.location.reload()}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              ) : hasMetrics ? (
                 <div className="grid grid-cols-2 gap-4">
-                  <Stat label="Best model" value={info?.best_model ?? "—"} wide />
-                  <Stat label="Accuracy" value={`${(best.accuracy * 100).toFixed(1)}%`} />
-                  <Stat label="F1 Score" value={best.f1.toFixed(3)} />
-                  <Stat label="ROC-AUC" value={best.roc_auc.toFixed(3)} />
-                  <Stat label="Recall" value={best.recall.toFixed(3)} />
+                  <Stat label="Best model" value={bestModelName} wide />
+                  <Stat label="Accuracy" value={formatPercent(best.accuracy)} />
+                  <Stat label="F1 Score" value={formatMetric(best.f1)} />
+                  <Stat label="ROC-AUC" value={formatMetric(best.roc_auc)} />
+                  <Stat label="Recall" value={formatMetric(best.recall)} />
+                  <Stat label="Precision" value={formatMetric(best.precision)} />
                 </div>
               ) : (
-                <p className="text-sm text-slate-400">Loading live metrics from the API…</p>
+                <div className="text-center py-8 text-slate-500">
+                  <p className="text-sm">No model metrics available.</p>
+                  <p className="text-xs mt-1">Please ensure models are trained and loaded.</p>
+                </div>
               )}
             </CardContent>
           </Card>

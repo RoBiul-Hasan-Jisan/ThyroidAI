@@ -4,6 +4,9 @@ from typing import Optional, List, Dict, Any
 from app.core.model_loader import get_bundle
 from app.core.analytics import get_analytics
 from app.schemas.schemas import PatientInput
+import json
+import traceback
+import math
 
 router = APIRouter()
 
@@ -17,8 +20,36 @@ class PredictAllRequest(BaseModel):
     patient: Dict[str, Any]
 
 
+# Helper function to clean NaN/Inf values
+def clean_for_json(obj):
+    """Recursively clean objects for JSON serialization."""
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    elif isinstance(obj, dict):
+        return {k: clean_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [clean_for_json(item) for item in obj]
+    else:
+        return obj
+
+
 # ============================================
-# Features Endpoint (FIX: Add this)
+# Analytics Endpoint
+# ============================================
+
+@router.get("/analytics")
+def analytics():
+    """Get EDA analytics data for the frontend dashboard."""
+    try:
+        return get_analytics()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading analytics: {str(e)}")
+
+
+# ============================================
+# Features Endpoint
 # ============================================
 
 @router.get("/features")
@@ -47,6 +78,9 @@ def feature_importance(model_key: str = "best"):
         if model_key == "best":
             model_key = bundle.best_model_key
         
+        if model_key is None:
+            return {"features": []}
+        
         model = bundle.models.get(model_key)
         if model is None:
             return {"features": []}
@@ -54,8 +88,21 @@ def feature_importance(model_key: str = "best"):
         # Try to get feature importance
         if hasattr(model, 'feature_importances_'):
             importances = model.feature_importances_
-            # Map to feature names
-            return {"features": []}
+            # Get feature names from preprocessor
+            feature_names = bundle.encoded_feature_names
+            
+            # Create sorted list of feature importance
+            features = []
+            for idx, importance in enumerate(importances):
+                if idx < len(feature_names):
+                    features.append({
+                        "feature": feature_names[idx],
+                        "importance": float(importance)
+                    })
+            
+            # Sort by importance descending
+            features = sorted(features, key=lambda x: x["importance"], reverse=True)
+            return {"features": features[:20]}  # Top 20 features
         
         # Fallback: use correlation-based importance from metadata
         return {"features": bundle.metadata.get("feature_importance", [])}
@@ -74,32 +121,78 @@ def list_models():
     try:
         bundle = get_bundle()
         
-        # Get available models from metadata
-        available_models = bundle.metadata.get("available_models", {})
+        print("🔍 Getting available models from bundle...")
         
-        # Format response
-        models_list = []
-        for key, info in available_models.items():
-            # Check if model is loaded
-            is_loaded = key in bundle.models and bundle.models[key] is not None
-            
-            if is_loaded:
-                models_list.append({
-                    "key": key,
-                    "name": info.get("name", key),
-                    "type": info.get("type", "ML"),
-                    "is_keras": info.get("is_keras", False),
-                    "is_best": info.get("name") == bundle.best_model_name,
-                    "path": info.get("path", ""),
-                    "metrics": info.get("metrics", {})
+        # Get available models from the bundle's available_models
+        models_list = bundle.get_available_models()
+        
+        print(f"📊 Got {len(models_list)} models")
+        
+        # Ensure all data is JSON serializable
+        formatted_models = []
+        for model in models_list:
+            try:
+                # Get metrics safely
+                metrics = model.get("metrics", {})
+                
+                formatted_model = {
+                    "key": str(model.get("key", "")),
+                    "name": str(model.get("name", "")),
+                    "type": str(model.get("type", "ML")),
+                    "is_keras": bool(model.get("is_keras", False)),
+                    "is_best": bool(model.get("is_best", False)),
+                    "path": str(model.get("path", "")),
+                    "metrics": {
+                        "accuracy": float(metrics.get("accuracy", 0.0)) if metrics.get("accuracy") is not None else None,
+                        "precision": float(metrics.get("precision", 0.0)) if metrics.get("precision") is not None else None,
+                        "recall": float(metrics.get("recall", 0.0)) if metrics.get("recall") is not None else None,
+                        "f1": float(metrics.get("f1", 0.0)) if metrics.get("f1") is not None else None,
+                        "roc_auc": float(metrics.get("roc_auc", 0.0)) if metrics.get("roc_auc") is not None else None,
+                        "cv_roc_auc_mean": float(metrics.get("cv_roc_auc_mean")) if metrics.get("cv_roc_auc_mean") is not None else None,
+                        "cv_roc_auc_std": float(metrics.get("cv_roc_auc_std")) if metrics.get("cv_roc_auc_std") is not None else None,
+                    }
+                }
+                # Clean any NaN/Inf values
+                formatted_model = clean_for_json(formatted_model)
+                formatted_models.append(formatted_model)
+            except Exception as e:
+                print(f"❌ Error formatting model {model.get('key', 'unknown')}: {e}")
+                # Add a minimal fallback model entry
+                formatted_models.append({
+                    "key": str(model.get("key", "unknown")),
+                    "name": str(model.get("name", "Unknown Model")),
+                    "type": "ML",
+                    "is_keras": False,
+                    "is_best": False,
+                    "path": "",
+                    "metrics": {
+                        "accuracy": 0.0,
+                        "precision": 0.0,
+                        "recall": 0.0,
+                        "f1": 0.0,
+                        "roc_auc": 0.0,
+                        "cv_roc_auc_mean": None,
+                        "cv_roc_auc_std": None,
+                    }
                 })
         
-        return {
-            "available_models": models_list,
-            "best_model": bundle.best_model_name,
-            "model_comparison": bundle.metadata.get("all_model_metrics", [])
+        # Get model comparison from metadata
+        model_comparison = bundle.metadata.get("all_models", [])
+        # Clean comparison data
+        model_comparison = clean_for_json(model_comparison)
+        
+        response = {
+            "available_models": formatted_models,
+            "best_model": str(bundle.best_model_name),
+            "model_comparison": model_comparison if model_comparison else []
         }
+        
+        print(f"✅ Returning {len(formatted_models)} models to frontend")
+        return response
+        
     except Exception as e:
+        print(f"❌ Error in /models endpoint: {str(e)}")
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Error loading models: {str(e)}")
 
 
@@ -108,8 +201,12 @@ def model_comparison():
     """Get model comparison metrics."""
     try:
         bundle = get_bundle()
-        return bundle.metadata.get("all_model_metrics", [])
+        # Get comparison from metadata
+        comparison = bundle.metadata.get("all_models", [])
+        # Clean for JSON
+        return clean_for_json(comparison)
     except Exception as e:
+        print(f"❌ Error in /models/comparison: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -118,15 +215,16 @@ def model_metrics(model_key: str):
     """Get metrics for a specific model."""
     try:
         bundle = get_bundle()
-        available_models = bundle.metadata.get("available_models", {})
+        metrics = bundle.get_model_metrics(model_key)
         
-        if model_key not in available_models:
+        if not metrics:
             raise HTTPException(status_code=404, detail=f"Model '{model_key}' not found")
         
-        return available_models[model_key].get("metrics", {})
+        return clean_for_json(metrics)
     except HTTPException:
         raise
     except Exception as e:
+        print(f"❌ Error in /models/{model_key}/metrics: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -136,24 +234,42 @@ def best_model():
     try:
         bundle = get_bundle()
         
-        # Find best model
-        best_key = None
-        best_info = None
-        for key, info in bundle.metadata.get("available_models", {}).items():
-            if info.get("name") == bundle.best_model_name:
-                best_key = key
-                best_info = info
-                break
+        # Get best model info from metadata
+        best_model_data = bundle.metadata.get("best_model", {})
         
+        response = {
+            "key": str(bundle.best_model_key) if bundle.best_model_key else None,
+            "name": str(bundle.best_model_name),
+            "type": str(best_model_data.get("type", "ML")),
+            "is_keras": bool(bundle.is_keras),
+            "metrics": best_model_data.get("metrics", {})
+        }
+        return clean_for_json(response)
+    except Exception as e:
+        print(f"❌ Error in /models/best: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# Debug Endpoint
+# ============================================
+
+@router.get("/debug/models")
+def debug_models():
+    """Debug endpoint to see raw model data."""
+    try:
+        bundle = get_bundle()
         return {
-            "key": best_key,
-            "name": bundle.best_model_name,
-            "type": bundle.metadata.get("best_model_type", "ML"),
-            "is_keras": bundle.is_keras,
-            "metrics": bundle.metrics.get("best_model_metrics", {})
+            "available_models_raw": clean_for_json(bundle.available_models),
+            "loaded_models": {k: str(v is not None) for k, v in bundle.models.items()},
+            "best_model_key": bundle.best_model_key,
+            "best_model_name": bundle.best_model_name,
+            "metadata_keys": list(bundle.metadata.keys()),
+            "all_models_from_metadata": clean_for_json(bundle.metadata.get("all_models", [])),
+            "models_list_from_get_available": clean_for_json(bundle.get_available_models())
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"error": str(e), "traceback": traceback.format_exc()}
 
 
 # ============================================
@@ -186,11 +302,13 @@ def predict(request: PredictRequest):
         
         # Make prediction with chosen model
         result = bundle.predict(patient, model_choice=request.model_choice)
-        return result
+        return clean_for_json(result)
         
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        print(f"❌ Error in /predict: {str(e)}")
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -204,9 +322,10 @@ def predict_all(request: PredictAllRequest):
         patient = request.patient
         
         predictions = {}
-        available_models = bundle.metadata.get("available_models", {})
+        available_models = bundle.get_available_models()
         
-        for key in available_models.keys():
+        for model_info in available_models:
+            key = model_info["key"]
             try:
                 result = bundle.predict(patient, model_choice=key)
                 predictions[key] = result
@@ -221,13 +340,16 @@ def predict_all(request: PredictAllRequest):
         
         agreement = len(set(pred_values)) == 1 if pred_values else False
         
-        return {
+        response = {
             "predictions": predictions,
             "agreement": agreement,
             "models_used": list(predictions.keys())
         }
+        return clean_for_json(response)
         
     except Exception as e:
+        print(f"❌ Error in /predict-all: {str(e)}")
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -243,17 +365,20 @@ def explain(request: PredictRequest):
         # Make prediction with chosen model
         result = bundle.predict(patient, model_choice=request.model_choice)
         
-        return {
+        response = {
             "shap_factors": result.get("shap_factors", []),
             "explanation": result.get("explanation", [])
         }
+        return clean_for_json(response)
         
     except Exception as e:
+        print(f"❌ Error in /explain: {str(e)}")
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================
-# Validation Endpoints
+# Validation Endpoint
 # ============================================
 
 @router.post("/validate")
@@ -284,11 +409,12 @@ def validate(patient: Dict[str, Any]):
         }
         
     except Exception as e:
+        print(f"❌ Error in /validate: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================
-# Model Info Endpoint (if needed)
+# Model Info Endpoint
 # ============================================
 
 @router.get("/model-info")
@@ -296,18 +422,73 @@ def model_info():
     """Get model performance metrics and information."""
     try:
         bundle = get_bundle()
+        metadata = bundle.metadata
+        
+        # Get best model data
+        best_model_data = metadata.get("best_model", {})
+        dataset_info = metadata.get("dataset_info", {})
         
         response = {
-            "best_model": bundle.best_model_name,
-            "best_model_type": bundle.metadata.get("best_model_type", "Unknown"),
-            "selection_priority": bundle.metadata.get("selection_priority", ["roc_auc", "f1", "recall"]),
-            "all_models": bundle.metadata.get("all_model_metrics", []),
-            "best_model_metrics": bundle.metadata.get("best_model_metrics", {}),
-            "roc_curves": bundle.metadata.get("roc_curves", {}),
-            "confusion_matrix": bundle.metadata.get("confusion_matrix", []),
+            "best_model": str(bundle.best_model_name),
+            "best_model_type": str(best_model_data.get("type", "Unknown")),
+            "selection_priority": metadata.get("selection_priority", ["roc_auc", "f1", "recall"]),
+            "all_models": metadata.get("all_models", []),
+            "best_model_metrics": best_model_data.get("metrics", {}),
+            "roc_curves": metadata.get("roc_curves", {}),
+            "confusion_matrix": best_model_data.get("confusion_matrix", []),
             "target_classes": bundle.target_classes,
-            "dataset_info": bundle.metadata.get("dataset_info", {}),
+            "dataset_info": dataset_info,
         }
-        return response
+        return clean_for_json(response)
     except Exception as e:
+        print(f"❌ Error in /model-info: {str(e)}")
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Error loading model info: {str(e)}")
+
+
+# ============================================
+# Health Endpoint
+# ============================================
+
+@router.get("/health")
+def health():
+    """Health check endpoint."""
+    try:
+        bundle = get_bundle()
+        available = [str(k) for k, v in bundle.models.items() if v is not None]
+        return {
+            "status": "ok",
+            "best_model": str(bundle.best_model_name),
+            "model_type": "DL" if bundle.is_keras else "ML",
+            "features": len(bundle.feature_cols),
+            "is_keras": bool(bundle.is_keras),
+            "available_models": available
+        }
+    except Exception as e:
+        print(f"❌ Error in /health: {str(e)}")
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+# ============================================
+# Root Endpoint
+# ============================================
+
+@router.get("/")
+def root():
+    """Root endpoint."""
+    return {
+        "message": "ThyroidAI API",
+        "version": "1.0.0",
+        "endpoints": {
+            "/health": "Health check",
+            "/features": "Get feature information",
+            "/models": "List available models",
+            "/predict": "Make a prediction",
+            "/predict-all": "Predict with all models",
+            "/explain": "Get SHAP explanation",
+            "/model-info": "Get model performance metrics"
+        }
+    }
