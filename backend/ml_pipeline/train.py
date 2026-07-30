@@ -1,7 +1,17 @@
 
+
+"""
+ThyroidAI ML Pipeline
+======================
+Full training pipeline for the Differentiated Thyroid Cancer Recurrence dataset.
+Model selection priority: ROC-AUC -> F1 -> Recall
+"""
 import os
 import json
 import warnings
+import zipfile
+import shutil
+import math
 warnings.filterwarnings("ignore")
 
 import numpy as np
@@ -32,26 +42,37 @@ tf.random.set_seed(RANDOM_STATE)
 
 print(" Imports loaded successfully!")
 
-"""Why This Cell?
-Purpose: Load all necessary libraries for the entire pipeline
+# What This Cell Does:
+# Purpose: Imports all necessary libraries and sets up the environment for the machine learning pipeline.
+# 
+# Key Decisions & Rationale:
+# 
+# warnings.filterwarnings("ignore") - Suppresses warnings to keep output clean and readable
+# 
+# RANDOM_STATE = 42 - Ensures reproducibility across runs (42 is the "answer to life, the universe, and everything" - a common joke in data science)
+# 
+# np.random.seed(42) and tf.random.set_seed(42) - Sets random seeds for NumPy and TensorFlow to ensure reproducible results
+# 
+# Imports are organized by purpose:
+# 
+# OS/File operations: os, json, zipfile, shutil - for file management
+# 
+# Data manipulation: numpy, pandas, joblib - for data processing and model serialization
+# 
+# Scikit-learn: For traditional ML models, preprocessing, and metrics
+# 
+# XGBoost/LightGBM: Gradient boosting libraries (often perform well on tabular data)
+# 
+# TensorFlow/Keras: For deep learning model
+# 
+# SHAP: For model interpretability
 
-Key Decisions:
 
-warnings.filterwarnings("ignore") - Suppresses warnings to keep output clean
-
-RANDOM_STATE = 42 - Ensures reproducible results across runs
-
-Separate imports for sklearn, XGBoost, LightGBM, TensorFlow, and SHAP
-
-Sets random seeds for NumPy and TensorFlow for reproducibility
-"""
-
+# Mount Google Drive
 from google.colab import drive
 drive.mount('/content/drive')
 
-# If using Google Drive, set paths here
-# BASE_DIR = "/content/drive/MyDrive/ThyroidAI"
-# If using local upload, use:
+
 BASE_DIR = "/content"
 DATA_PATH = os.path.join(BASE_DIR, "Thyroid_Diff.csv")
 MODEL_DIR = os.path.join(BASE_DIR, "models")
@@ -60,37 +81,36 @@ os.makedirs(MODEL_DIR, exist_ok=True)
 print(f"Data path: {DATA_PATH}")
 print(f"Model directory: {MODEL_DIR}")
 
-"""Why This Cell?
-Purpose: Set up file paths for data loading and model saving
+# Upload file if needed
+from google.colab import files
+if not os.path.exists(DATA_PATH):
+    print("Please upload Thyroid_Diff.csv")
+    uploaded = files.upload()
+    # The file will be in the current directory, move it if needed
+    if "Thyroid_Diff.csv" in uploaded:
+        shutil.move("Thyroid_Diff.csv", DATA_PATH)
+        print(f"File moved to {DATA_PATH}")
 
-Key Decisions:
+# What This Cell Does:
+# Purpose: Sets up file paths and mounts Google Drive for persistent storage.
+# 
+# Key Decisions & Rationale:
+# 
+# Google Drive mounting - Allows saving models permanently (not lost when Colab session ends)
+# 
+# Flexible paths - Can switch between Drive (/content/drive/MyDrive/ThyroidAI) and local (/content)
+# 
+# Auto-upload - If the CSV file isn't found, prompts user to upload it directly
+# 
+# os.makedirs(MODEL_DIR, exist_ok=True) - Creates the models directory if it doesn't exist (prevents errors)
+# 
+# shutil.move() - Moves uploaded file to the correct location
 
-Google Drive mounting allows persistent storage across sessions
-
-os.makedirs(MODEL_DIR, exist_ok=True) creates directory if it doesn't exist
-
-Paths are configurable - can switch between Drive and local storage
-
-/content/ is Colab's default working directory
-
-Why This Cell?
-Purpose: Upload the dataset from local machine to Colab
-
-Key Decisions:
-
-Uses Google Colab's built-in file upload widget
-
-Verifies file was uploaded before proceeding
-
-Alternative: Can download directly from UCI repository
-"""
 
 TARGET_COL = "Recurred"
 
-
 df = pd.read_csv(DATA_PATH)
-print(f"Loaded {df.shape[0]} rows, {df.shape[1]} columns")
-
+print(f" Loaded {df.shape[0]} rows, {df.shape[1]} columns")
 
 assert TARGET_COL in df.columns, f"Target column '{TARGET_COL}' not found"
 assert df.shape[0] > 0, "Dataset is empty"
@@ -102,24 +122,23 @@ print(f"Class balance:\n{df[TARGET_COL].value_counts()}")
 
 display(df.head())
 
-"""Why This Cell?
-Purpose: Load and validate the dataset
+# What This Cell Does:
+# Purpose: Loads the dataset and performs initial validation.
+# 
+# Key Decisions & Rationale:
+# 
+# TARGET_COL = "Recurred" - Defines the target column for prediction
+# 
+# assert statements - Fail-fast approach: if data is invalid, stop immediately rather than continuing with errors
+# 
+# Duplicate detection - Identifies duplicate rows to understand data quality
+# 
+# Class balance display - Shows distribution of target classes (important for imbalanced classification)
+# 
+# df.head() - Quick visual inspection of data structure
 
-Key Decisions:
 
-assert statements act as sanity checks - fail early if something's wrong
-
-Check for duplicates to understand data quality
-
-Display class balance - important for imbalanced classification
-
-TARGET_COL = "Recurred" matches the dataset's target column name
-
-display(df.head()) gives visual inspection of the data structure
-
-## Missing value handling
-"""
-
+# Missing value handling
 missing_total = df.isnull().sum().sum()
 print(f"Missing values found: {missing_total}")
 
@@ -133,22 +152,23 @@ if missing_total > 0:
 else:
     print("No missing values — dataset is clean.")
 
-"""Why This Cell?
-Purpose: Handle missing values before modeling
+# What This Cell Does:
+# Purpose: Handles any missing values in the dataset.
+# 
+# Key Decisions & Rationale:
+# 
+# Different strategies for different data types:
+# 
+# Categorical (object dtype) - Uses mode (most frequent value). Why? The mode is the most common category, which is a reasonable guess.
+# 
+# Numeric - Uses median (middle value). Why? Median is robust to outliers (unlike mean which can be skewed by extreme values).
+# 
+# Why not just drop rows? - With only 383 rows, dropping rows could lose valuable data. Imputation preserves the dataset size.
+# 
+# Checks for missing values first - Avoids unnecessary operations if data is already clean.
 
-Key Decisions:
 
-Mode imputation for categorical variables - most frequent value
-
-Median imputation for numeric variables - robust to outliers
-
-Different strategies for different data types
-
-Checks for missing values first to avoid unnecessary operations
-
-## Encoding categorical features + scaling numeric features
-"""
-
+# Encoding categorical features + scaling numeric features
 feature_cols = [c for c in df.columns if c != TARGET_COL]
 numeric_features = ["Age"]
 categorical_features = [c for c in feature_cols if c not in numeric_features]
@@ -173,28 +193,29 @@ X_train_t = preprocessor.transform(X_train)
 X_test_t = preprocessor.transform(X_test)
 print(f"Encoded feature dimensionality: {X_train_t.shape[1]}")
 
-"""Why This Cell?
-Purpose: Prepare features for machine learning models
+# What This Cell Does:
+# Purpose: Prepares features for machine learning models.
+# 
+# Key Decisions & Rationale:
+# 
+# Target encoding - LabelEncoder converts "No"→0, "Yes"→1 (required for binary classification)
+# 
+# Stratified split - stratify=y preserves class distribution in both train and test sets (critical for imbalanced data)
+# 
+# 80/20 split - Standard practice (more training data = better models)
+# 
+# ColumnTransformer - Applies different transformations to different column types:
+# 
+# StandardScaler for Age - Standardizes to mean=0, std=1. Why? Many ML algorithms (SVM, Logistic Regression) are sensitive to feature scales.
+# 
+# OneHotEncoder for categorical - Converts categories to binary vectors. Why? ML models require numeric inputs.
+# 
+# handle_unknown="ignore" - Handles unseen categories in test data without crashing
+# 
+# preprocessor.fit(X_train) then transform both - Prevents data leakage (using test data to fit the transformer)
 
-Key Decisions:
 
-LabelEncoder for target - converts "No"/"Yes" to 0/1
-
-Stratified split - preserves class distribution in train/test
-
-ColumnTransformer - applies different transformations to different columns
-
-StandardScaler - standardizes Age to mean=0, std=1 (important for SVM, Logistic Regression)
-
-OneHotEncoder - converts categorical variables to binary vectors
-
-handle_unknown="ignore" - handles unseen categories in test data
-
-80/20 train-test split with random_state for reproducibility
-
-## Model training + evaluation
-"""
-
+# Model training + evaluation
 pos_weight = (y_train == 0).sum() / (y_train == 1).sum()
 
 sk_models = {
@@ -238,28 +259,47 @@ for name, model in sk_models.items():
     fitted_models[name] = model
     print(f"{name:22s} | Acc {metrics['accuracy']:.4f} | F1 {metrics['f1']:.4f} | ROC-AUC {metrics['roc_auc']:.4f}")
 
-"""Why This Cell?
-Purpose: Train and evaluate multiple ML models
+# What This Cell Does:
+# Purpose: Trains and evaluates 7 different ML models.
+# 
+# Key Decisions & Rationale:
+# 
+# pos_weight - Computes the ratio of negative to positive samples (used for XGBoost's scale_pos_weight parameter)
+# 
+# Model Selection Rationale:
+# 
+# Logistic Regression - Baseline model, interpretable, fast
+# 
+# Random Forest - Ensemble of decision trees, handles non-linear relationships well
+# 
+# SVM with RBF kernel - Powerful for non-linear classification
+# 
+# KNN - Simple instance-based learning
+# 
+# Gradient Boosting - Sequential boosting, often high performance
+# 
+# XGBoost - Regularized boosting, handles imbalanced data with scale_pos_weight
+# 
+# LightGBM - Fast gradient boosting, efficient with class_weight="balanced"
+# 
+# Hyperparameter choices:
+# 
+# class_weight="balanced" - Automatically adjusts weights for imbalanced classes (important for rare event prediction)
+# 
+# n_estimators=300 - More trees = better performance (diminishing returns after certain point)
+# 
+# max_depth=6 for Random Forest - Prevents overfitting on small dataset
+# 
+# learning_rate=0.05 - Small learning rate for gradual learning
+# 
+# Cross-validation - 5-fold stratified CV gives more reliable performance estimates
+# 
+# ROC-AUC scoring - Better for imbalanced classification than accuracy
+# 
+# Stores predictions and probabilities - For ROC curves and later analysis
 
-Key Decisions:
 
-7 different models - diverse algorithms for comparison
-
-Class weighting - handles imbalanced data (pos_weight for XGBoost, class_weight for others)
-
-Cross-validation - 5-fold stratified CV gives more reliable performance estimates
-
-ROC-AUC scoring - appropriate for imbalanced classification
-
-Stores ROC curves - for later visualization
-
-Tracks multiple metrics - accuracy, precision, recall, F1, ROC-AUC
-
-Hyperparameter tuning - reasonable defaults for each model
-
-## Training Deep Learning model: TensorFlow/Keras ANN
-"""
-
+# Training Deep Learning model: TensorFlow/Keras ANN
 print("\nTraining Deep Learning model: TensorFlow/Keras ANN")
 n_features = X_train_t.shape[1]
 class_weight_dict = {0: 1.0, 1: float(pos_weight)}
@@ -312,29 +352,45 @@ ann_metrics = {
 results.append(ann_metrics)
 print(f"{'Neural Network (ANN)':22s} | Acc {ann_metrics['accuracy']:.4f} | F1 {ann_metrics['f1']:.4f} | ROC-AUC {ann_metrics['roc_auc']:.4f} | epochs run: {len(history.history['loss'])}")
 
-"""Why This Cell?
-Purpose: Train a deep neural network for comparison
+# What This Cell Does:
+# Purpose: Builds, trains, and evaluates a deep neural network.
+# 
+# Key Decisions & Rationale:
+# 
+# Architecture (128 → 64 → 32 → 1) - Decreasing layers allow the network to learn hierarchical features:
+# 
+# First layer: 128 neurons (captures complex interactions)
+# 
+# Second layer: 64 neurons (compresses features)
+# 
+# Third layer: 32 neurons (further abstraction)
+# 
+# Output layer: 1 neuron with sigmoid (binary classification)
+# 
+# Dropout layers (0.3, 0.2) - Prevents overfitting by randomly dropping neurons during training
+# 
+# ReLU activation - Non-linear activation, avoids vanishing gradient problem
+# 
+# Sigmoid output - Outputs probability between 0 and 1 (perfect for binary classification)
+# 
+# Adam optimizer with learning_rate=1e-3 - Adaptive learning rate, good for most problems
+# 
+# Binary crossentropy loss - Standard for binary classification
+# 
+# Early stopping - patience=25 stops training when validation AUC doesn't improve for 25 epochs
+# 
+# Prevents overfitting
+# 
+# Saves time (doesn't waste epochs on no improvement)
+# 
+# Restores best weights automatically
+# 
+# Class weights - Handles imbalanced data by giving more weight to minority class
+# 
+# Batch size=16 - Small batch size for better generalization
+# 
+# Validation split=20% - Monitors performance on held-out validation data
 
-Key Decisions:
-
-Architecture: 128 → 64 → 32 → 1 (decreasing layers)
-
-Dropout - 30%, 20% to prevent overfitting
-
-Early stopping - prevents overfitting, saves time
-
-Class weights - handles imbalanced data
-
-Adam optimizer - adaptive learning rate
-
-Sigmoid output - binary classification
-
-Validation split - 20% for monitoring
-
-AUC metric - tracks area under ROC curve
-
-Runs up to 300 epochs - stops early if no improvement
-"""
 
 results_df = pd.DataFrame(results).sort_values(
     by=["roc_auc", "f1", "recall"], ascending=False
@@ -342,7 +398,6 @@ results_df = pd.DataFrame(results).sort_values(
 results_df = results_df.where(pd.notnull(results_df), None)
 
 print("MODEL COMPARISON (sorted by ROC-AUC, then F1, then Recall)")
-
 display(results_df)
 
 best_row = results_df.iloc[0]
@@ -351,30 +406,40 @@ print(f"\n>>> SELECTED BEST MODEL: {best_name}")
 
 is_ann_best = best_name == "Neural Network (Keras ANN)"
 
-"""Why This Cell?
-Purpose: Select the best model based on multiple criteria
+# What This Cell Does:
+# Purpose: Compares all models and selects the best one.
+# 
+# Key Decisions & Rationale:
+# 
+# Selection Priority: ROC-AUC → F1 → Recall
+# 
+# ROC-AUC is primary metric. Why?
+# 
+# Handles imbalanced data well
+# 
+# Doesn't require choosing a threshold
+# 
+# Good overall measure of model performance
+# 
+# F1 as second priority. Why?
+# 
+# Harmonic mean of precision and recall
+# 
+# Good balance between false positives and false negatives
+# 
+# Recall as third priority. Why?
+# 
+# In medical context, we want to catch as many recurrence cases as possible
+# 
+# False negatives (missing a recurrence) are worse than false positives
+# 
+# Sorting descending - Best model appears first
+# 
+# results_df.where(pd.notnull(results_df), None) - Handles NaN values cleanly
 
-Key Decisions:
 
-Priority order: ROC-AUC → F1 → Recall
 
-ROC-AUC is preferred for imbalanced data
-
-F1 balances precision and recall
-
-Recall handles the minority class (recurrence)
-
-DataFrame sorted and displayed for comparison
-
-Stored as results_df for later use
-
-## Model saving
-"""
-
-# ============================================
 # CLEAN METRICS FUNCTION (Remove NaN/Inf)
-# ============================================
-import math
 
 def clean_metrics(metrics_dict):
     """Remove NaN, Inf, and None values from metrics dict"""
@@ -393,9 +458,22 @@ def clean_metrics(metrics_dict):
             cleaned[key] = value
     return cleaned
 
-# ============================================
-# MODEL SAVING - FIXED FOR BACKEND
-# ============================================
+# What This Cell Does:
+# Purpose: Cleans metric dictionaries by removing NaN, Inf, and None values.
+# 
+# Key Decisions & Rationale:
+# 
+# Why needed? - Some metrics (like cross-validation scores for Neural Network) may be NaN
+# 
+# JSON compatibility - NaN and Inf are not valid JSON values
+# 
+# Recursive handling - Handles nested dictionaries and lists
+# 
+# Rounding - Rounds floats to 6 decimal places for cleaner output
+
+
+
+# UPDATED: ALWAYS SAVE KERAS MODEL
 
 
 # 1. Save preprocessor and encoders
@@ -421,36 +499,113 @@ for model_name, model in fitted_models.items():
     model_path = os.path.join(all_models_dir, f"{safe_name}.pkl")
     try:
         joblib.dump(model, model_path)
-        print(f"✅ Saved {model_name} -> {safe_name}.pkl")
+        print(f" Saved {model_name} -> {safe_name}.pkl")
     except Exception as e:
         print(f" Could not save {model_name}: {e}")
 
-# 4. Save best model
-if is_ann_best:
-    # Save Keras model in .keras format only
-    ann.save(os.path.join(MODEL_DIR, "best_model.keras"))
-    print(" Saved best_model.keras")
+# What This Cell Does:
+# Purpose: Saves preprocessing objects and all trained models.
+# 
+# Key Decisions & Rationale:
+# 
+# joblib vs pickle - joblib is more efficient for large numpy arrays (scikit-learn models)
+# 
+# Save preprocessor - Needed to transform new data during inference
+# 
+# Save target encoder - Needed to decode predictions back to class labels
+# 
+# Save all models - Allows experimenting with different models without retraining
+# 
+# Safe filenames - Replaces spaces and slashes to ensure valid filenames
+# 
+# Error handling - Continues even if one model fails to save
+# 
+# 
 
-    # Also save weights as .h5 for compatibility
-    ann.save_weights(os.path.join(MODEL_DIR, "best_model.weights.h5"))
-    print(" Saved best_model.weights.h5")
 
-    # Save wrapper as .pkl
-    ann_wrapper = {
-        "model_type": "keras",
-        "model_path": "best_model.keras",
-        "weights_path": "best_model.weights.h5",
-        "class_weight": class_weight_dict,
-        "feature_count": n_features
-    }
-    joblib.dump(ann_wrapper, os.path.join(MODEL_DIR, "best_model.pkl"))
-    print(" Saved best_model.pkl (Keras wrapper)")
+# 4. ALWAYS SAVE KERAS MODEL (regardless of best)
+
+
+
+
+# Save Keras model in .keras format
+keras_path = os.path.join(MODEL_DIR, "best_model.keras")
+ann.save(keras_path)
+print(f" Saved best_model.keras at: {keras_path}")
+
+# Verify the file was saved
+if os.path.exists(keras_path):
+    print(f" best_model.keras size: {os.path.getsize(keras_path) / 1024:.2f} KB")
 else:
-    # Save sklearn model
-    joblib.dump(fitted_models[best_name], os.path.join(MODEL_DIR, "best_model.pkl"))
-    print(f" Saved best_model.pkl -> {best_name}")
+    print(" ERROR: best_model.keras was not saved!")
 
-# 5. Save individual important models
+# Also save weights as .h5 for compatibility
+weights_path = os.path.join(MODEL_DIR, "best_model.weights.h5")
+ann.save_weights(weights_path)
+print(f" Saved best_model.weights.h5 at: {weights_path}")
+
+# Verify weights file
+if os.path.exists(weights_path):
+    print(f" best_model.weights.h5 size: {os.path.getsize(weights_path) / 1024:.2f} KB")
+else:
+    print(" ERROR: best_model.weights.h5 was not saved!")
+
+# Save wrapper as .pkl
+ann_wrapper = {
+    "model_type": "keras",
+    "model_path": "best_model.keras",
+    "weights_path": "best_model.weights.h5",
+    "class_weight": class_weight_dict,
+    "feature_count": n_features,
+    "metrics": ann_metrics
+}
+wrapper_path = os.path.join(MODEL_DIR, "best_model_keras.pkl")
+joblib.dump(ann_wrapper, wrapper_path)
+print(f" Saved best_model_keras.pkl (Keras wrapper) at: {wrapper_path}")
+
+# Additional safety: Save a backup copy
+backup_dir = os.path.join(BASE_DIR, "backup_models")
+os.makedirs(backup_dir, exist_ok=True)
+
+# Copy to backup
+shutil.copy2(keras_path, os.path.join(backup_dir, "best_model.keras"))
+shutil.copy2(weights_path, os.path.join(backup_dir, "best_model.weights.h5"))
+print(f" Backup copies saved to: {backup_dir}")
+
+# What This Cell Does:
+# Purpose: ALWAYS saves the Keras model regardless of whether it's the best model.
+# 
+# Key Decisions & Rationale:
+# 
+# Always save Keras - This is the key change! Previously only saved if it was the best model
+# 
+# Two file formats:
+# 
+# best_model.keras - TensorFlow's recommended format (saves architecture + weights + optimizer state)
+# 
+# best_model.weights.h5 - Legacy H5 format (weights only) for compatibility
+# 
+# Verification - Checks that files were actually created and reports their sizes
+# 
+# Wrapper file - Stores additional metadata (class weights, feature count, metrics) for easy loading
+# 
+# Backup copies - Creates a backup folder as extra safety net
+# 
+# Why save both formats? - .keras is the modern format, .h5 ensures compatibility with older code
+
+
+# 5. Save best model (either sklearn or keras)
+if is_ann_best:
+    # If Keras is best, save it as best_model.pkl
+    joblib.dump(ann_wrapper, os.path.join(MODEL_DIR, "best_model.pkl"))
+    print(f" Saved best_model.pkl -> Neural Network (Keras ANN)")
+else:
+    # Save sklearn model as best_model.pkl
+    sklearn_path = os.path.join(MODEL_DIR, "best_model.pkl")
+    joblib.dump(fitted_models[best_name], sklearn_path)
+    print(f" Saved best_model.pkl -> {best_name} at: {sklearn_path}")
+
+# 6. Save individual important models
 important_models = {
     "XGBoost": "xgb_model.pkl",
     "Random Forest": "random_forest_model.pkl",
@@ -464,12 +619,13 @@ important_models = {
 for model_name, filename in important_models.items():
     if model_name in fitted_models:
         try:
-            joblib.dump(fitted_models[model_name], os.path.join(MODEL_DIR, filename))
+            model_path = os.path.join(MODEL_DIR, filename)
+            joblib.dump(fitted_models[model_name], model_path)
             print(f" Saved {model_name} -> {filename}")
         except Exception as e:
             print(f" Could not save {model_name}: {e}")
 
-# 6. Save SHAP background
+# 7. Save SHAP background
 if 'X_train_dense' in locals():
     background_idx = np.random.RandomState(RANDOM_STATE).choice(
         X_train_t.shape[0], size=min(50, X_train_t.shape[0]), replace=False
@@ -478,12 +634,30 @@ if 'X_train_dense' in locals():
     joblib.dump(X_background, os.path.join(MODEL_DIR, "shap_background.pkl"))
     print(" Saved shap_background.pkl")
 
-# ============================================
-# SAVE METADATA WITH CLEAN METRICS
-# ============================================
-print("\n" + "=" * 70)
-print("SAVING METADATA")
-print("=" * 70)
+# What This Cell Does:
+# Purpose: Saves the best model and important individual models.
+# 
+# Key Decisions & Rationale:
+# 
+# Best model saving - Uses wrapper if Keras, direct joblib if sklearn
+# 
+# Individual important models - Saves each model separately for easy loading
+# 
+# SHAP background - Random sample of 50 training points for model interpretability
+# 
+# Needed for SHAP explanations
+# 
+# Small sample (50) keeps file size manageable
+# 
+# Used as "background" for SHAP KernelExplainer
+# 
+# 
+
+
+
+# SAVE METADATA WITH VERIFICATION
+
+
 
 # Get categorical options
 categorical_options = {c: sorted(df[c].astype(str).unique().tolist()) for c in categorical_features}
@@ -498,10 +672,12 @@ cm = confusion_matrix(y_test, y_pred_best)
 # Clean confusion matrix
 cm_clean = [[int(x) for x in row] for row in cm.tolist()]
 
-# Prepare model files list
+# Prepare model files list with verification
 model_files = {
     "best_model": "best_model.pkl",
-    "best_model_keras": "best_model.keras" if is_ann_best else None,
+    "best_model_keras": "best_model.keras",  # Always saved
+    "best_model_weights": "best_model.weights.h5",  # Always saved
+    "best_model_keras_wrapper": "best_model_keras.pkl",
     "preprocessing": "preprocessing.pkl",
     "target_encoder": "target_encoder.pkl",
     "shap_background": "shap_background.pkl"
@@ -545,13 +721,17 @@ metadata = {
     "selection_priority": ["roc_auc", "f1", "recall"],
 
     # Best model metrics (cleaned)
-    "best_model_metrics": clean_metrics(best_row.to_dict())
+    "best_model_metrics": clean_metrics(best_row.to_dict()),
+
+    # Keras model metrics (always included)
+    "keras_model_metrics": clean_metrics(ann_metrics)
 }
 
 # Save metadata
-with open(os.path.join(MODEL_DIR, "metadata.json"), "w") as f:
+metadata_path = os.path.join(MODEL_DIR, "metadata.json")
+with open(metadata_path, "w") as f:
     json.dump(metadata, f, indent=2, default=str)
-print(" Saved metadata.json")
+print(f" Saved metadata.json at: {metadata_path}")
 
 # Save metrics separately
 metrics_out = {
@@ -559,14 +739,17 @@ metrics_out = {
     "best_model_metrics": clean_metrics(best_row.to_dict()),
     "selection_priority": ["roc_auc", "f1", "recall"],
     "all_models": clean_results,
+    "keras_model_metrics": clean_metrics(ann_metrics)
 }
-with open(os.path.join(MODEL_DIR, "metrics.json"), "w") as f:
+metrics_path = os.path.join(MODEL_DIR, "metrics.json")
+with open(metrics_path, "w") as f:
     json.dump(metrics_out, f, indent=2, default=str)
-print(" Saved metrics.json")
+print(f" Saved metrics.json at: {metrics_path}")
 
 # Save model comparison CSV
-results_df_clean.to_csv(os.path.join(MODEL_DIR, "model_comparison.csv"), index=False)
-print(" Saved model_comparison.csv")
+csv_path = os.path.join(MODEL_DIR, "model_comparison.csv")
+results_df_clean.to_csv(csv_path, index=False)
+print(f" Saved model_comparison.csv at: {csv_path}")
 
 # Save ROC curves (clean)
 roc_curves_clean = {}
@@ -575,81 +758,65 @@ for name, curve in roc_curves.items():
         "fpr": [float(x) for x in curve["fpr"]],
         "tpr": [float(x) for x in curve["tpr"]]
     }
-with open(os.path.join(MODEL_DIR, "roc_curves.json"), "w") as f:
+roc_path = os.path.join(MODEL_DIR, "roc_curves.json")
+with open(roc_path, "w") as f:
     json.dump(roc_curves_clean, f, default=str)
-print(" Saved roc_curves.json")
+print(f" Saved roc_curves.json at: {roc_path}")
 
-"""Why This Cell?
-Purpose: Save everything needed for deployment
-
-Key Decisions:
-
-joblib - efficient serialization for sklearn objects
-
-Keras format - saved separately for neural networks
-
-JSON files - human-readable format for metadata
-
-Complete metadata - feature names, options, class balance
-
-Model type detection - handles both sklearn and Keras models
-
-Confusion matrix - stored for performance visualization
-
-Categorical options - precomputed for frontend forms
-"""
-
-print("\nBuilding SHAP background dataset...")
-background_idx = np.random.RandomState(RANDOM_STATE).choice(
-    X_train_t.shape[0], size=min(50, X_train_t.shape[0]), replace=False
-)
-X_background = X_train_dense[background_idx]
-joblib.dump(X_background, os.path.join(MODEL_DIR, "shap_background.pkl"))
-
-ohe = preprocessor.named_transformers_["cat"]
-ohe_feature_names = ohe.get_feature_names_out(categorical_features).tolist()
-all_encoded_feature_names = numeric_features + ohe_feature_names
-with open(os.path.join(MODEL_DIR, "encoded_feature_names.json"), "w") as f:
-    json.dump(all_encoded_feature_names, f)
-
-print(" SHAP background dataset created")
-
-"""Why This Cell?
-Purpose: Prepare for model explainability with SHAP
-
-Key Decisions:
-
-Background dataset - 50 random samples (sufficient for SHAP)
-
-Background used - for KernelExplainer or TreeExplainer
-
-Feature names - stored for interpretability
-
-Precomputed - speeds up future SHAP explanations
-
-Random selection - ensures representative sample
-"""
-
-from google.colab import files
-import shutil
+# What This Cell Does:
+# Purpose: Saves comprehensive metadata about the training run.
+# 
+# Key Decisions & Rationale:
+# 
+# Complete information - Stores everything needed to understand and reproduce the results
+# 
+# Multiple formats - JSON (human-readable), CSV (spreadsheet compatible)
+# 
+# Confusion matrix - Shows performance breakdown by class
+# 
+# Categorical options - Pre-computed for frontend forms (dropdown options)
+# 
+# Feature lists - For data validation during inference
+# 
+# Model files list - Documents what files were saved
+# 
+# Keras metrics included - Even if not the best model, still included in metadata
 
 
-shutil.make_archive('/content/models', 'zip', '/content/models')
-files.download('/content/models.zip')
-print(" Models downloaded as models.zip")
 
-"""# viz part"""
+# VERIFICATION: List all saved files
 
-import os
-import pandas as pd
-import numpy as np
+
+for file in sorted(os.listdir(MODEL_DIR)):
+    file_path = os.path.join(MODEL_DIR, file)
+    if os.path.isfile(file_path):
+        size = os.path.getsize(file_path) / 1024
+        print(f" {file:30s} {size:8.2f} KB")
+    elif os.path.isdir(file_path):
+        print(f" {file:30s} {'(directory)'}")
+
+# Special verification for best_model.keras (should always exist now)
+keras_file = os.path.join(MODEL_DIR, "best_model.keras")
+if os.path.exists(keras_file):
+    print(f"\n SUCCESS: best_model.keras exists at {keras_file}")
+    print(f"   File size: {os.path.getsize(keras_file) / 1024:.2f} KB")
+else:
+    print(f"\n ERROR: best_model.keras NOT FOUND at {keras_file}")
+
+weights_file = os.path.join(MODEL_DIR, "best_model.weights.h5")
+if os.path.exists(weights_file):
+    print(f" SUCCESS: best_model.weights.h5 exists at {weights_file}")
+    print(f"   File size: {os.path.getsize(weights_file) / 1024:.2f} KB")
+else:
+    print(f" ERROR: best_model.weights.h5 NOT FOUND at {weights_file}")
+
+
+
+
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.preprocessing import LabelEncoder
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
-import warnings
-warnings.filterwarnings("ignore")
 
 # Set style
 plt.style.use('seaborn-v0_8-darkgrid')
@@ -660,44 +827,21 @@ sns.set_context("notebook", font_scale=1.2)
 OUT_DIR = os.path.join(BASE_DIR, "plots")
 os.makedirs(OUT_DIR, exist_ok=True)
 
-
-print("EXPLORATORY DATA ANALYSIS")
-
 print(f"Plots will be saved to: {OUT_DIR}")
 
-"""##  Dataset Overview"""
-
-print(f"Total samples: {df.shape[0]}")
-print(f"Total features: {df.shape[1]}")
-print(f"Target column: {TARGET_COL}")
-print(f"Target classes: {df[TARGET_COL].unique().tolist()}")
-
-# Basic statistics
-print("\n BASIC STATISTICS")
-
-
-print(df.describe(include='all').round(2))
-
-# Data types
-print("\n DATA TYPES")
-
-print(df.dtypes)
-
-"""##  Target Distribution Analysis"""
-
+# 1. Target Distribution Analysis
 fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
 # Count plot
 ax1 = axes[0]
 counts = df[TARGET_COL].value_counts()
-colors = ['#2ecc71', '#e74c3c']  # Green for No, Red for Yes
+colors = ['#2ecc71', '#e74c3c']
 bars = ax1.bar(counts.index, counts.values, color=colors, edgecolor='black', linewidth=1.5)
 ax1.set_title('Target Distribution', fontsize=14, fontweight='bold')
 ax1.set_xlabel('Recurrence')
 ax1.set_ylabel('Count')
 ax1.grid(axis='y', alpha=0.3)
 
-# Add percentage labels on bars
 total = len(df)
 for bar, count in zip(bars, counts.values):
     height = bar.get_height()
@@ -708,7 +852,7 @@ for bar, count in zip(bars, counts.values):
 
 # Pie chart
 ax2 = axes[1]
-explode = (0.05, 0.1)  # Explode the "Yes" slice
+explode = (0.05, 0.1)
 wedges, texts, autotexts = ax2.pie(counts.values,
                                    labels=counts.index,
                                    autopct='%1.1f%%',
@@ -724,11 +868,7 @@ plt.savefig(f"{OUT_DIR}/1_target_distribution.png", dpi=300, bbox_inches='tight'
 plt.show()
 plt.close()
 
-print(f" Target distribution plot saved to {OUT_DIR}")
-print(f"Class distribution: No={counts.get('No', 0)} ({counts.get('No', 0)/len(df)*100:.1f}%), Yes={counts.get('Yes', 0)} ({counts.get('Yes', 0)/len(df)*100:.1f}%)")
-
-"""## Age Distribution Analysis"""
-
+# 2. Age Distribution Analysis
 fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
 # Histogram with KDE
@@ -765,14 +905,36 @@ plt.savefig(f"{OUT_DIR}/2_age_analysis.png", dpi=300, bbox_inches='tight')
 plt.show()
 plt.close()
 
-print(" Age analysis plots saved")
-print(f"Age statistics - Mean: {df['Age'].mean():.2f}, Median: {df['Age'].median():.2f}, Std: {df['Age'].std():.2f}")
+# What This Cell Does:
+# Purpose: Creates visualizations for target distribution and age analysis.
+# 
+# Key Decisions & Rationale:
+# 
+# Seaborn style - Professional-looking plots with seaborn-v0_8-darkgrid
+# 
+# High resolution - 300 DPI for publication-ready images
+# 
+# Green/Red colors - Intuitive: No recurrence (green = good), Recurrence (red = bad)
+# 
+# Target distribution:
+# 
+# Bar chart with percentages - Shows class imbalance clearly
+# 
+# Pie chart - Alternative visualization
+# 
+# Age analysis (3 plots):
+# 
+# Histogram - Shows overall age distribution with mean and median
+# Box plot - Compares age distribution between classes
+# Violin + swarm - Shows distribution shape and individual data points
+# Why multiple plots? - Different perspectives on the same data
+# 
+# 
 
-"""## Categorical Features Analysis"""
 
+# 3. Categorical Features Analysis
 categorical_cols = [c for c in df.columns if c not in ['Age', TARGET_COL] and df[c].dtype == 'object']
 
-# Create subplots for categorical features
 n_cols = 3
 n_rows = (len(categorical_cols) + n_cols - 1) // n_cols
 fig, axes = plt.subplots(n_rows, n_cols, figsize=(18, 5*n_rows))
@@ -781,7 +943,6 @@ axes = axes.flatten()
 for idx, col in enumerate(categorical_cols):
     if idx < len(axes):
         ax = axes[idx]
-        # Create cross-tabulation
         crosstab = pd.crosstab(df[col], df[TARGET_COL], normalize='index') * 100
         crosstab.plot(kind='bar', ax=ax, color=['#2ecc71', '#e74c3c'], edgecolor='black', linewidth=0.5)
         ax.set_title(f'{col}\n(Recurrence Rate by Category)', fontsize=11, fontweight='bold')
@@ -791,7 +952,6 @@ for idx, col in enumerate(categorical_cols):
         ax.grid(axis='y', alpha=0.3)
         ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
 
-# Hide unused subplots
 for idx in range(len(categorical_cols), len(axes)):
     axes[idx].set_visible(False)
 
@@ -800,21 +960,12 @@ plt.savefig(f"{OUT_DIR}/3_categorical_analysis.png", dpi=300, bbox_inches='tight
 plt.show()
 plt.close()
 
-print(f" Categorical features analysis saved ({len(categorical_cols)} features)")
-
-"""## Correlation Analysis"""
-
-# Select only numeric columns for correlation
-numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-numeric_cols_with_target = [c for c in numeric_cols if c != TARGET_COL]
-
-# Also encode categorical variables for correlation
+# 4. Correlation Analysis
 enc_df = df.copy()
 for c in enc_df.columns:
     if not pd.api.types.is_numeric_dtype(enc_df[c]):
         enc_df[c] = LabelEncoder().fit_transform(enc_df[c].astype(str))
 
-# Full correlation matrix with all encoded features
 plt.figure(figsize=(14, 12))
 correlation_matrix = enc_df.corr()
 mask = np.triu(np.ones_like(correlation_matrix, dtype=bool))
@@ -854,77 +1005,49 @@ plt.savefig(f"{OUT_DIR}/5_correlation_with_target.png", dpi=300, bbox_inches='ti
 plt.show()
 plt.close()
 
-print(f" Correlation analysis saved")
-print(f"Top 5 correlated features with target:")
-print(corr_with_target.drop(TARGET_COL).head(5))
+# What This Cell Does:
+# Purpose: Visualizes categorical features and correlation analysis.
+# 
+# Key Decisions & Rationale:
+# 
+# Categorical features - Shows recurrence rate per category
+# 
+# Each plot shows percentage of recurrence vs no recurrence
+# 
+# Helps identify which categories are risk factors
+# 
+# Dynamic grid layout (3 columns, adjusts rows)
+# 
+# normalize='index' - Shows percentages within each category (not overall)
+# 
+# Correlation heatmap - Shows relationships between all features
+# 
+# mask=np.triu() - Shows only lower triangle (avoids redundancy)
+# 
+# coolwarm colormap - Red = positive correlation, Blue = negative
+# 
+# Annotations - Shows correlation coefficients
+# 
+# Correlation with target - Bar chart sorted by correlation strength
+# 
+# Green = positive correlation (increases recurrence risk)
+# 
+# Red = negative correlation (decreases recurrence risk)
+# 
+# Dashed lines - Highlight meaningful correlations (>0.2 or <-0.2)
+# 
+# 
 
-"""##  Feature Distribution by Target"""
 
-# Select only numeric features (excluding Age which we already did)
-numeric_features = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c]) and c != TARGET_COL]
-
-# Get top correlated numeric features
-if len(numeric_features) > 0:
-    corr_with_target = enc_df.corr()[TARGET_COL].drop(TARGET_COL)
-    top_features = corr_with_target.abs().sort_values(ascending=False).head(6).index.tolist()
-
-    # Filter to only numeric features
-    top_numeric_features = [f for f in top_features if f in numeric_features]
-
-    if len(top_numeric_features) > 0:
-        fig, axes = plt.subplots(2, 3, figsize=(18, 10))
-        axes = axes.flatten()
-
-        for idx, feature in enumerate(top_numeric_features[:6]):
-            if idx < len(axes):
-                ax = axes[idx]
-                # Check if feature is numeric
-                if pd.api.types.is_numeric_dtype(df[feature]):
-                    # Box plot
-                    data_no = df[df[TARGET_COL] == 'No'][feature].dropna()
-                    data_yes = df[df[TARGET_COL] == 'Yes'][feature].dropna()
-
-                    bp = ax.boxplot([data_no, data_yes],
-                                   labels=['No', 'Yes'],
-                                   patch_artist=True,
-                                   medianprops=dict(color='black', linewidth=2))
-
-                    # Color the boxes
-                    bp['boxes'][0].set_facecolor('#2ecc71')
-                    bp['boxes'][1].set_facecolor('#e74c3c')
-
-                    ax.set_title(f'{feature}\n(by Recurrence)', fontsize=12, fontweight='bold')
-                    ax.set_xlabel('Recurrence')
-                    ax.set_ylabel('Value')
-                    ax.grid(alpha=0.3)
-
-        # Hide unused subplots
-        for idx in range(len(top_numeric_features), len(axes)):
-            axes[idx].set_visible(False)
-
-        plt.tight_layout()
-        plt.savefig(f"{OUT_DIR}/6_top_features_by_target.png", dpi=300, bbox_inches='tight')
-        plt.show()
-        plt.close()
-        print(f" Top features distribution saved ({len(top_numeric_features)} features)")
-    else:
-        print(" No numeric features found for distribution plot")
-else:
-    print(" No numeric features found for distribution plot")
-
-"""## Dimensionality Reduction (PCA & t-SNE)"""
-
-# Prepare data for dimensionality reduction
+# 5. Dimensionality Reduction (PCA & t-SNE)
 X_encoded = enc_df.drop(columns=[TARGET_COL])
 y_encoded = enc_df[TARGET_COL]
 
-# PCA
 pca = PCA(n_components=2)
 pca_result = pca.fit_transform(X_encoded)
 
 fig, axes = plt.subplots(1, 2, figsize=(16, 6))
 
-# PCA plot
 ax1 = axes[0]
 scatter1 = ax1.scatter(pca_result[:, 0], pca_result[:, 1],
                       c=y_encoded, cmap='RdYlGn', alpha=0.7,
@@ -935,7 +1058,6 @@ ax1.set_title('PCA Visualization', fontsize=14, fontweight='bold')
 ax1.grid(alpha=0.3)
 plt.colorbar(scatter1, ax=ax1, label='Recurrence (0=No, 1=Yes)')
 
-# t-SNE (use subsample for speed if dataset is large)
 try:
     if len(df) > 500:
         sample_idx = np.random.choice(len(df), 500, replace=False)
@@ -961,69 +1083,13 @@ except Exception as e:
     print(f" t-SNE plot error: {e}")
 
 plt.tight_layout()
-plt.savefig(f"{OUT_DIR}/7_dimensionality_reduction.png", dpi=300, bbox_inches='tight')
+plt.savefig(f"{OUT_DIR}/6_dimensionality_reduction.png", dpi=300, bbox_inches='tight')
 plt.show()
 plt.close()
 
-print(" Dimensionality reduction plots saved")
-
-"""## Pair Plot (Top Features)"""
-
-# Select top numeric features for pairplot
-numeric_features = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c]) and c != TARGET_COL]
-if len(numeric_features) >= 2:
-    # Get top correlated features
-    top_numeric = corr_with_target.abs().sort_values(ascending=False).head(5).index.tolist()
-    top_numeric = [f for f in top_numeric if f in numeric_features]
-
-    if len(top_numeric) >= 2:
-        pairplot_data = df[top_numeric[:4] + [TARGET_COL]].copy()
-
-        g = sns.pairplot(pairplot_data,
-                        hue=TARGET_COL,
-                        palette=['#2ecc71', '#e74c3c'],
-                        diag_kind='kde',
-                        markers=['o', 's'],
-                        plot_kws={'alpha': 0.6, 'edgecolor': 'black', 'linewidth': 0.5})
-        g.fig.suptitle('Pair Plot of Top Features', fontsize=16, fontweight='bold', y=1.02)
-
-        plt.tight_layout()
-        plt.savefig(f"{OUT_DIR}/8_pairplot_top_features.png", dpi=300, bbox_inches='tight')
-        plt.show()
-        plt.close()
-        print(f" Pair plot saved with {len(top_numeric[:4])} features")
-    else:
-        print(" Not enough numeric features for pair plot")
-else:
-    print(" Not enough numeric features for pair plot")
-
-"""## Missing Value Analysis"""
-
-missing_data = df.isnull().sum()
-missing_data = missing_data[missing_data > 0]
-
-if len(missing_data) > 0:
-    plt.figure(figsize=(10, 6))
-    missing_data.plot(kind='bar', color='orange', edgecolor='black')
-    plt.title('Missing Values by Feature', fontsize=14, fontweight='bold')
-    plt.xlabel('Features')
-    plt.ylabel('Number of Missing Values')
-    plt.xticks(rotation=45, ha='right')
-    for i, v in enumerate(missing_data):
-        plt.text(i, v + 0.5, str(v), ha='center', fontweight='bold')
-    plt.tight_layout()
-    plt.savefig(f"{OUT_DIR}/9_missing_values.png", dpi=300, bbox_inches='tight')
-    plt.show()
-    plt.close()
-    print(f" Missing values plot saved ({len(missing_data)} features with missing values)")
-else:
-    print(" No missing values found in dataset")
-
-"""##  Class Imbalance Analysis"""
-
+# 6. Class Imbalance Analysis
 fig, axes = plt.subplots(1, 3, figsize=(16, 5))
 
-# 1. Class distribution bar
 ax = axes[0]
 counts = df[TARGET_COL].value_counts()
 colors_bar = ['#2ecc71' if label == 'No' else '#e74c3c' for label in counts.index]
@@ -1038,13 +1104,11 @@ for bar, count in zip(bars, counts.values):
     ax.text(bar.get_x() + bar.get_width()/2., height + 5,
             f'{count}\n({percentage:.1f}%)', ha='center', fontweight='bold')
 
-# 2. Imbalance ratio
 ax = axes[1]
 no_count = counts.get('No', 0)
 yes_count = counts.get('Yes', 0)
 ratio = no_count / yes_count if yes_count > 0 else float('inf')
 
-# Create a gauge-like visualization
 imbalance_text = f'No/Yes Ratio: {ratio:.2f}\n\n'
 if ratio > 5:
     imbalance_text += ' Severe Imbalance\n(Needs SMOTE/Random Sampling)'
@@ -1060,7 +1124,6 @@ ax.text(0.5, 0.5, imbalance_text, horizontalalignment='center', verticalalignmen
 ax.axis('off')
 ax.set_title('Imbalance Analysis', fontsize=14, fontweight='bold')
 
-# 3. Pie chart with annotation
 ax = axes[2]
 wedges, texts, autotexts = ax.pie(counts.values,
                                  labels=counts.index,
@@ -1072,9 +1135,44 @@ wedges, texts, autotexts = ax.pie(counts.values,
 ax.set_title('Class Proportions', fontsize=14, fontweight='bold')
 
 plt.tight_layout()
-plt.savefig(f"{OUT_DIR}/10_class_imbalance_analysis.png", dpi=300, bbox_inches='tight')
+plt.savefig(f"{OUT_DIR}/7_class_imbalance_analysis.png", dpi=300, bbox_inches='tight')
 plt.show()
 plt.close()
 
-print(f" Class imbalance analysis saved")
-print(f"Imbalance Ratio (No/Yes): {ratio:.2f}")
+
+
+# What This Cell Does:
+# Purpose: Creates dimensionality reduction visualizations and class imbalance analysis.
+# 
+# Key Decisions & Rationale:
+# 
+# PCA (Principal Component Analysis) - Linear dimensionality reduction
+# 
+# Shows explained variance per component
+# 
+# Helps visualize if data is linearly separable
+# 
+# Color-coded by class - Green (No recurrence), Red (Recurrence)
+# 
+# t-SNE - Non-linear dimensionality reduction
+# 
+# Better at preserving local structure
+# 
+# More complex, handles non-linear patterns
+# 
+# Subsampling - Uses 500 samples if dataset is large (speeds up computation)
+# 
+# perplexity=30 - Controls balance between local and global structure
+# 
+# Class imbalance analysis (3 plots):
+# 
+# Bar chart - Shows class counts with percentages
+# Imbalance severity - Text-based analysis with recommendations:
+# Ratio > 5: Severe imbalance → Recommend SMOTE/Random Sampling
+# Ratio > 3: High imbalance → Consider Class Weights
+# Ratio > 1.5: Moderate imbalance → Use Balanced Class Weight
+# Ratio ≤ 1.5: Balanced → No special handling needed
+# Pie chart - Visual proportion
+# Why PCA + t-SNE? - Both provide different perspectives on data structure
+# 
+#

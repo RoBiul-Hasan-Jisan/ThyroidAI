@@ -304,7 +304,7 @@ export default function PredictPage() {
                     </div>
                   </div>
                   {selectedModelInfo.is_keras && (
-                    <div className="mt-1 text-xs text-purple-600">🧠 Deep Learning Model</div>
+                    <div className="mt-1 text-xs text-purple-600"> Deep Learning Model</div>
                   )}
                 </motion.div>
               )}
