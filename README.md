@@ -6,8 +6,7 @@ ThyroidAI is a full-stack research and education platform for predicting recurre
 
 > **Safety:** ThyroidAI is not a certified clinical decision-support system. It does not diagnose, prescribe, or replace professional medical judgment. The RAG layer never overrides the prediction; it adds contextual evidence only when locally supplied documents are available.
 
-![ThyroidAI local RAG pipeline](docs/thyroidai-rag-pipeline.png)
-
+![ThyroidAI local RAG pipeline](https://raw.githubusercontent.com/RoBiul-Hasan-Jisan/ThyroidAI/main/docs/thyroidai-rag-pipeline.png)
 ## Example: input to grounded output
 
 This is the practical flow when a user submits one patient profile. The prediction model runs first; the local RAG layer then uses the prediction and SHAP factors to retrieve relevant passages and produce a cited explanation. The example values below are illustrative documentation values, not a clinical conclusion.
