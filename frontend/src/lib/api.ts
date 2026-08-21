@@ -5,6 +5,8 @@ import {
   PredictionResponse,
   AnalyticsResponse,
   ModelsResponse,
+  RagExplainResponse,
+  RagStatusResponse,
 } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -180,4 +182,42 @@ export async function downloadModelArtifacts(modelKey: string): Promise<Blob> {
     responseType: 'blob',
   });
   return response.data;
+}
+
+// ============================================
+// RAG (medical context) Functions
+// ============================================
+// Fully additive: separate endpoints, never called as part of predictRecurrence.
+// A RAG failure (Ollama down, no documents ingested, etc.) surfaces as a
+// `status` field on the response rather than a thrown error where possible.
+
+/**
+ * Check whether the local RAG stack (ingested documents + Ollama) is ready,
+ * without triggering a full retrieval + generation call.
+ */
+export async function getRagStatus(): Promise<RagStatusResponse> {
+  const { data } = await client.get("/api/rag/status");
+  return data;
+}
+
+/**
+ * Get a grounded, cited medical-context explanation for an existing
+ * prediction + SHAP result. Uses a longer timeout since local LLM
+ * generation on CPU can take a while.
+ */
+export async function explainWithRag(
+  patient: Record<string, string | number>,
+  prediction: { prediction: string; probability: number },
+  shapFactors: { feature: string; value?: string; impact: number; direction: string }[]
+): Promise<RagExplainResponse> {
+  const { data } = await client.post(
+    "/api/rag/explain",
+    {
+      patient,
+      prediction,
+      shap_factors: shapFactors,
+    },
+    { timeout: 120000 }
+  );
+  return data;
 }

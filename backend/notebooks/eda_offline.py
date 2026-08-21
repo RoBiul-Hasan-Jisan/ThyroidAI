@@ -1,5 +1,5 @@
 """
-Standalone offline EDA script (optional / reference only).
+Standalone offline EDA script .
 
 The live application performs EDA interactively via `GET /api/analytics`
 (see backend/app/core/analytics.py) and renders it with Recharts in the

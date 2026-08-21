@@ -11,6 +11,25 @@ services:
     volumes:
       - ./backend/models:/app/models
       - ./backend/data:/app/data
+      - ./backend/rag/documents:/app/rag/documents
+      # Persist the ChromaDB + BM25 index across rebuilds. Ingestion is a
+      # separate, explicit step (see README) -- it is never run automatically
+      # on container start.
+      - ./backend/rag/vectorstore:/app/rag/vectorstore
+    environment:
+      # RAG / local LLM config. No API key required anywhere here.
+      - RAG_ENABLED=${RAG_ENABLED:-true}
+      - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-BAAI/bge-small-en-v1.5}
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - LLM_MODEL=${LLM_MODEL:-qwen2.5:3b}
+      # Ollama is expected to run on the HOST, not inside this container.
+      # host.docker.internal resolves to the host from within the backend
+      # container on Docker Desktop (Mac/Windows); on Linux you may need to
+      # run Ollama with `OLLAMA_HOST=0.0.0.0` and point this at the host's
+      # LAN/bridge IP, or add `extra_hosts` mapping host.docker.internal.
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]

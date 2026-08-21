@@ -62,6 +62,40 @@ export interface ModelInfoResponse {
   };
 }
 
+// ============================================
+// RAG (medical context) types
+// ============================================
+
+export interface RagEvidenceChunk {
+  text: string;
+  source: string;
+  document: string;
+  section: string;
+  page: number;
+  score: number;
+}
+
+export type RagStatus = "completed" | "rag_unavailable" | "no_evidence";
+
+export interface RagExplainResponse {
+  status: RagStatus;
+  summary?: string;
+  clinical_context?: string;
+  evidence: RagEvidenceChunk[];
+  retrieval_method: string;
+  limitations?: string;
+  disclaimer: string;
+  queries_used: string[];
+}
+
+export interface RagStatusResponse {
+  rag_enabled: boolean;
+  documents_ingested: boolean;
+  num_chunks: number;
+  ollama_available: boolean;
+  ready: boolean;
+}
+
 // Add CrosstabRow interface
 export interface CrosstabRow {
   category: string;

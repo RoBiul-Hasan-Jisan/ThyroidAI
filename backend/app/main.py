@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import api
+from app.routers import api, rag
 from app.core.model_loader import get_bundle
 
 app = FastAPI(
@@ -31,3 +31,11 @@ def root():
 
 
 app.include_router(api.router, prefix="/api", tags=["ThyroidAI"])
+
+# RAG is fully additive: a separate router, separate prefix, and it never
+# imports from or modifies anything the /api/predict path depends on. RAG
+# is not loaded/warmed at startup (unlike the ML model bundle above) -- the
+# embedding model and vector store are only touched lazily, on first use of
+# /api/rag/explain, so a machine with no Ollama/RAG setup still boots and
+# serves predictions normally.
+app.include_router(rag.router, prefix="/api/rag", tags=["RAG"])

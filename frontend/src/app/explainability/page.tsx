@@ -8,12 +8,21 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { PredictionResponse } from "@/lib/types";
-import { ArrowRight, TrendingDown, TrendingUp } from "lucide-react";
+import { PredictionResponse, RagExplainResponse } from "@/lib/types";
+import { explainWithRag } from "@/lib/api";
+import { ArrowRight, TrendingDown, TrendingUp, Sparkles, FileText, AlertTriangle } from "lucide-react";
+
+type RagUiState = "idle" | "retrieving" | "generating" | "completed" | "unavailable";
 
 export default function ExplainabilityPage() {
   const [result, setResult] = useState<PredictionResponse | null>(null);
   const [patient, setPatient] = useState<Record<string, string | number> | null>(null);
+
+  // RAG (AI Medical Context) is a fully separate, opt-in call: it never
+  // runs automatically and never affects the ML prediction/SHAP panels
+  // above. If it fails, only this panel shows "unavailable".
+  const [ragState, setRagState] = useState<RagUiState>("idle");
+  const [ragResult, setRagResult] = useState<RagExplainResponse | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -22,6 +31,29 @@ export default function ExplainabilityPage() {
     if (raw) setResult(JSON.parse(raw));
     if (rawPatient) setPatient(JSON.parse(rawPatient));
   }, []);
+
+  async function handleGenerateRagExplanation() {
+    if (!result || !patient) return;
+    setRagState("retrieving");
+    setRagResult(null);
+    try {
+      // "retrieving" -> "generating" is a UI-only phase transition (the
+      // backend call itself covers both steps); it gives the user a sense
+      // of progress during what can be a slow, CPU-bound local LLM call.
+      const generatingTimer = setTimeout(() => setRagState("generating"), 600);
+      const data = await explainWithRag(
+        patient,
+        { prediction: result.prediction, probability: result.probability },
+        result.shap_factors
+      );
+      clearTimeout(generatingTimer);
+      setRagResult(data);
+      setRagState(data.status === "completed" ? "completed" : "unavailable");
+    } catch {
+      setRagState("unavailable");
+      setRagResult(null);
+    }
+  }
 
   const chartData =
     result?.shap_factors
@@ -169,6 +201,112 @@ export default function ExplainabilityPage() {
           </div>
         </motion.div>
       )}
+
+      {result && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.1 }}
+          className="mt-6"
+        >
+          <Card>
+            <CardHeader>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-teal-600" /> AI Medical Context
+                  </CardTitle>
+                  <CardDescription>
+                    <strong className="text-slate-700">ML</strong> produced the prediction above.{" "}
+                    <strong className="text-slate-700">RAG</strong> (retrieval-augmented
+                    generation) below only adds cited background context from ingested medical
+                    reference documents — it never changes the prediction.
+                  </CardDescription>
+                </div>
+                {ragState === "idle" && (
+                  <Button variant="primary" onClick={handleGenerateRagExplanation}>
+                    Generate AI Medical Context
+                  </Button>
+                )}
+                {(ragState === "retrieving" || ragState === "generating") && (
+                  <Badge variant="teal">
+                    {ragState === "retrieving" ? "Retrieving evidence..." : "Generating explanation..."}
+                  </Badge>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {ragState === "idle" && (
+                <p className="text-sm text-slate-500">
+                  Not generated yet. This calls a locally-run model and hybrid retrieval over your
+                  ingested thyroid-cancer reference documents — it can take a little while on CPU.
+                </p>
+              )}
+
+              {ragState === "unavailable" && (
+                <div className="space-y-4">
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div>
+                      <p className="font-medium">AI generation is currently unavailable.</p>
+                      <p className="mt-1">
+                        {ragResult?.limitations ||
+                          "Retrieved medical evidence is still available below, if any was found. The prediction above remains fully usable."}
+                      </p>
+                    </div>
+                  </div>
+                  {!!ragResult?.evidence?.length && (
+                    <EvidenceList evidence={ragResult.evidence} />
+                  )}
+                  <Button variant="outline" onClick={handleGenerateRagExplanation}>
+                    Try again
+                  </Button>
+                </div>
+              )}
+
+              {ragState === "completed" && ragResult && (
+                <div className="space-y-5">
+                  <p className="whitespace-pre-line text-sm leading-relaxed text-slate-700">
+                    {ragResult.clinical_context}
+                  </p>
+
+                  <EvidenceList evidence={ragResult.evidence} />
+
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                    <Badge variant="outline">{ragResult.retrieval_method}</Badge>
+                    <Badge variant="outline">{ragResult.evidence.length} retrieved chunks</Badge>
+                  </div>
+
+                  <p className="border-t border-slate-100 pt-3 text-xs text-slate-400">
+                    {ragResult.disclaimer}
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
+    </div>
+  );
+}
+
+function EvidenceList({ evidence }: { evidence: RagExplainResponse["evidence"] }) {
+  if (!evidence.length) return null;
+  return (
+    <div>
+      <p className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-700">
+        <FileText className="h-4 w-4" /> Evidence
+      </p>
+      <ul className="space-y-2">
+        {evidence.map((chunk, i) => (
+          <li key={i} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+            <p className="mb-1 font-medium text-slate-800">
+              {chunk.source} — {chunk.section} — p.{chunk.page}
+            </p>
+            <p className="text-slate-600">{chunk.text}</p>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

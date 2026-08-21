@@ -121,12 +121,12 @@ def list_models():
     try:
         bundle = get_bundle()
         
-        print("🔍 Getting available models from bundle...")
+        print(" Getting available models from bundle...")
         
         # Get available models from the bundle's available_models
         models_list = bundle.get_available_models()
         
-        print(f"📊 Got {len(models_list)} models")
+        print(f" Got {len(models_list)} models")
         
         # Ensure all data is JSON serializable
         formatted_models = []
@@ -156,7 +156,7 @@ def list_models():
                 formatted_model = clean_for_json(formatted_model)
                 formatted_models.append(formatted_model)
             except Exception as e:
-                print(f"❌ Error formatting model {model.get('key', 'unknown')}: {e}")
+                print(f" Error formatting model {model.get('key', 'unknown')}: {e}")
                 # Add a minimal fallback model entry
                 formatted_models.append({
                     "key": str(model.get("key", "unknown")),
@@ -187,11 +187,11 @@ def list_models():
             "model_comparison": model_comparison if model_comparison else []
         }
         
-        print(f"✅ Returning {len(formatted_models)} models to frontend")
+        print(f" Returning {len(formatted_models)} models to frontend")
         return response
         
     except Exception as e:
-        print(f"❌ Error in /models endpoint: {str(e)}")
+        print(f" Error in /models endpoint: {str(e)}")
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Error loading models: {str(e)}")
 
@@ -206,7 +206,7 @@ def model_comparison():
         # Clean for JSON
         return clean_for_json(comparison)
     except Exception as e:
-        print(f"❌ Error in /models/comparison: {str(e)}")
+        print(f" Error in /models/comparison: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -224,7 +224,7 @@ def model_metrics(model_key: str):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Error in /models/{model_key}/metrics: {str(e)}")
+        print(f" Error in /models/{model_key}/metrics: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -243,7 +243,7 @@ def best_model():
         }
         return clean_for_json(response)
     except Exception as e:
-        print(f"❌ Error in /models/best: {str(e)}")
+        print(f" Error in /models/best: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -304,7 +304,7 @@ def predict(request: PredictRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        print(f"❌ Error in /predict: {str(e)}")
+        print(f" Error in /predict: {str(e)}")
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -345,7 +345,7 @@ def predict_all(request: PredictAllRequest):
         return clean_for_json(response)
         
     except Exception as e:
-        print(f"❌ Error in /predict-all: {str(e)}")
+        print(f" Error in /predict-all: {str(e)}")
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -369,7 +369,7 @@ def explain(request: PredictRequest):
         return clean_for_json(response)
         
     except Exception as e:
-        print(f"❌ Error in /explain: {str(e)}")
+        print(f" Error in /explain: {str(e)}")
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -406,7 +406,7 @@ def validate(patient: Dict[str, Any]):
         }
         
     except Exception as e:
-        print(f"❌ Error in /validate: {str(e)}")
+        print(f" Error in /validate: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -436,7 +436,7 @@ def model_info():
         }
         return clean_for_json(response)
     except Exception as e:
-        print(f"❌ Error in /model-info: {str(e)}")
+        print(f" Error in /model-info: {str(e)}")
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Error loading model info: {str(e)}")
 
@@ -460,7 +460,7 @@ def health():
             "available_models": available
         }
     except Exception as e:
-        print(f"❌ Error in /health: {str(e)}")
+        print(f" Error in /health: {str(e)}")
         return {
             "status": "error",
             "error": str(e)

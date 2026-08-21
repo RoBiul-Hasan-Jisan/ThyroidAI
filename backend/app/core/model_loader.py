@@ -1,8 +1,4 @@
-# backend/app/core/model_loader.py
-"""
-Loads all trained ML/DL artifacts once at startup and provides prediction +
-SHAP explanation utilities used by the API routers.
-"""
+
 import os
 import json
 import joblib
@@ -45,15 +41,15 @@ def _build_ann_architecture(n_features: int):
 
 class ModelBundle:
     def __init__(self):
-        print(f"📦 Loading model bundle from: {MODEL_DIR}")
+        print(f" Loading model bundle from: {MODEL_DIR}")
 
         # Load unified metadata
         try:
             with open(os.path.join(MODEL_DIR, "metadata.json")) as f:
                 self.metadata = json.load(f)
-            print("✅ Metadata loaded")
+            print(" Metadata loaded")
         except FileNotFoundError:
-            print("❌ metadata.json not found! Please train models first.")
+            print(" metadata.json not found! Please train models first.")
             raise
 
         # Load shared components
@@ -61,19 +57,19 @@ class ModelBundle:
             self.preprocessor = joblib.load(os.path.join(MODEL_DIR, "preprocessing.pkl"))
             self.target_encoder = joblib.load(os.path.join(MODEL_DIR, "target_encoder.pkl"))
             self.shap_background = joblib.load(os.path.join(MODEL_DIR, "shap_background.pkl"))
-            print("✅ Preprocessor and encoders loaded")
+            print(" Preprocessor and encoders loaded")
         except FileNotFoundError as e:
-            print(f"❌ Error loading preprocessor: {e}")
+            print(f" Error loading preprocessor: {e}")
             raise
 
         # Load ROC curve data (stored in a sibling file, not inside metadata.json)
         try:
             with open(os.path.join(MODEL_DIR, "roc_curves.json")) as f:
                 self.metadata["roc_curves"] = json.load(f)
-            print("✅ ROC curves loaded")
+            print(" ROC curves loaded")
         except FileNotFoundError:
             self.metadata.setdefault("roc_curves", {})
-            print("⚠️ roc_curves.json not found")
+            print(" roc_curves.json not found")
 
         # ------------------------------------------------------------------
         # Extract feature info. The real metadata.json stores these at the
@@ -96,7 +92,7 @@ class ModelBundle:
             with open(os.path.join(MODEL_DIR, "encoded_feature_names.json")) as f:
                 self.encoded_feature_names = json.load(f)
         except FileNotFoundError:
-            print("⚠️ encoded_feature_names.json not found, using feature_cols")
+            print(" encoded_feature_names.json not found, using feature_cols")
             self.encoded_feature_names = self.feature_cols
 
         # ------------------------------------------------------------------
@@ -204,7 +200,7 @@ class ModelBundle:
         # Load every model referenced in available_models.
         # ------------------------------------------------------------------
         self.models = {}
-        print("\n📊 Loading models:")
+        print("\n Loading models:")
         for model_key, model_info in self.available_models.items():
             model_path = os.path.join(MODEL_DIR, model_info["path"])
             if not os.path.exists(model_path):
@@ -212,7 +208,7 @@ class ModelBundle:
                 if os.path.exists(alt_path):
                     model_path = alt_path
                 else:
-                    print(f"   ⚠️ Model file not found: {model_info['path']}")
+                    print(f"    Model file not found: {model_info['path']}")
                     self.models[model_key] = None
                     continue
 
@@ -233,12 +229,12 @@ class ModelBundle:
                         metrics=["accuracy"],
                     )
                     self.models[model_key] = ann
-                    print(f"   ✅ Loaded Keras model from weights: {model_info['name']}")
+                    print(f"    Loaded Keras model from weights: {model_info['name']}")
                 else:
                     self.models[model_key] = joblib.load(model_path)
-                    print(f"   ✅ Loaded ML model: {model_info['name']}")
+                    print(f"    Loaded ML model: {model_info['name']}")
             except Exception as e:
-                print(f"   ❌ Could not load {model_info.get('name', model_key)}: {e}")
+                print(f"    Could not load {model_info.get('name', model_key)}: {e}")
                 self.models[model_key] = None
 
         # ------------------------------------------------------------------
@@ -284,13 +280,13 @@ class ModelBundle:
                         bg_sample,
                         feature_names=self.encoded_feature_names,
                     )
-                    print("✅ SHAP explainer initialized")
+                    print(" SHAP explainer initialized")
                 else:
-                    print("⚠️ Best model is None, SHAP explainer not initialized")
+                    print(" Best model is None, SHAP explainer not initialized")
             else:
-                print("⚠️ No best model found, SHAP explainer not initialized")
+                print(" No best model found, SHAP explainer not initialized")
         except Exception as e:
-            print(f"⚠️ Could not initialize SHAP explainer: {e}")
+            print(f" Could not initialize SHAP explainer: {e}")
             self.explainer = None
 
         # Get best model name for display
@@ -301,9 +297,9 @@ class ModelBundle:
             else:
                 display_name = self.best_model_key
 
-        print(f"\n✅ Best model: {display_name}")
+        print(f"\n Best model: {display_name}")
         available = [k for k, v in self.models.items() if v is not None]
-        print(f"✅ Available models: {available}")
+        print(f" Available models: {available}")
 
     def _row_to_dataframe(self, patient: dict) -> pd.DataFrame:
         """Convert patient dict to DataFrame with correct column order."""
@@ -358,7 +354,7 @@ class ModelBundle:
                 explanation_strings.append(f"{verb} risk: {feature}")
 
         except Exception as e:
-            print(f"⚠️ SHAP explanation failed: {e}")
+            print(f" SHAP explanation failed: {e}")
             explanation_strings.append("SHAP explanation temporarily unavailable")
 
         return {
@@ -417,6 +413,11 @@ class ModelBundle:
         for factor in shap_result["shap_factors"]:
             verb = "Increases" if factor["direction"] == "increases" else "Reduces"
             patient_value = patient.get(factor["feature"], "N/A")
+            # Additive field: exposes the patient's actual value for this
+            # feature alongside the SHAP impact. types.ts already declared
+            # this field; the RAG query builder also relies on it to turn
+            # SHAP factors into retrieval queries (e.g. Response=Excellent).
+            factor["value"] = patient_value
             explanation_with_values.append(
                 f"{verb} risk: {factor['feature']} (value: {patient_value})"
             )

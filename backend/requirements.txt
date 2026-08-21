@@ -10,3 +10,10 @@ lightgbm
 tensorflow-cpu
 shap
 joblib
+
+# --- RAG (all local / open-source, zero cost, no API keys) ---
+chromadb
+sentence-transformers
+rank-bm25
+pypdf
+requests
