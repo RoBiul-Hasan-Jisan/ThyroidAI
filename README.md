@@ -1,190 +1,320 @@
-# ThyroidAI — Explainable Thyroid Cancer Recurrence Prediction System
+# ThyroidAI
 
-A full-stack, explainable ML/DL healthcare application predicting recurrence of
-differentiated thyroid cancer, built on the UCI **Differentiated Thyroid Cancer
-Recurrence** dataset (Borzooei & Tarokhian, 2023 — 383 patients, 16
-clinicopathologic features, CC BY 4.0). Public demo system — no auth, opens
-directly into the AI dashboard.
+## Explainable thyroid-cancer recurrence prediction with local, evidence-grounded RAG
 
-## Project structure
+ThyroidAI is a full-stack research and education platform for predicting recurrence of differentiated thyroid cancer and explaining the result. It combines a reproducible ML/DL benchmark, SHAP feature attribution, and an optional local RAG layer that retrieves context from PDFs supplied by the user and generates a grounded explanation with local Ollama/Qwen.
 
+> **Safety:** ThyroidAI is not a certified clinical decision-support system. It does not diagnose, prescribe, or replace professional medical judgment. The RAG layer never overrides the prediction; it adds contextual evidence only when locally supplied documents are available.
+
+![ThyroidAI local RAG pipeline](docs/thyroidai-rag-pipeline.png)
+
+## Example: input to grounded output
+
+This is the practical flow when a user submits one patient profile. The prediction model runs first; the local RAG layer then uses the prediction and SHAP factors to retrieve relevant passages and produce a cited explanation. The example values below are illustrative documentation values, not a clinical conclusion.
+
+![ThyroidAI prediction and RAG output example](docs/thyroidai-rag-example.png)
+
+### Prediction dashboard with RAG answer
+
+The deployed-style dashboard below shows the complete user journey: the user enters clinicopathologic values, selects a model, receives the recurrence-risk prediction, and then reads the evidence-grounded RAG answer beside the result. In this project, the same flow can run locally without deploying the RAG service or paying for hosted AI infrastructure.
+
+![ThyroidAI prediction dashboard with ML result and RAG answer](https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-M7UTkqEsavNeNlPxntRGOaqgWbLPRL.png)
+
+### What the user sees
+
+1. **Input:** A patient profile is submitted to `POST /api/predict`.
+2. **ML output:** The selected model returns a class, probability, confidence, and SHAP factors. For example: `No recurrence predicted` with `95.69%` probability.
+3. **RAG context:** The frontend sends that result to `POST /api/rag/explain`. The query builder turns the highest-impact factors into retrieval queries, then combines BM25 and vector results with RRF and MMR.
+4. **Final output:** Local Ollama/Qwen summarizes only the retrieved passages and returns a status, explanation, evidence chunks, query list, citations, and limitations.
+
+A minimal request/response sequence looks like this:
+
+```text
+User profile
+  -> /api/predict
+  -> prediction + probability + SHAP factors
+  -> /api/rag/explain
+  -> retrieved evidence + local model
+  -> grounded explanation + citations + limitations
 ```
-thyroid-ai-platform/
-├── frontend/                     # Next.js 16 + TypeScript + Tailwind + shadcn-style UI
-│   ├── src/app/                  # landing, /predict, /explainability, /models, /analytics
-│   ├── src/components/ui/        # hand-built shadcn-pattern components (Radix + CVA)
-│   ├── src/lib/                  # api.ts (axios client), types.ts, utils.ts
-│   └── Dockerfile
-├── backend/                      # FastAPI service
-│   ├── app/
-│   │   ├── main.py               # app factory, CORS, startup model load
-│   │   ├── routers/api.py        # /api/health, /features, /model-info, /predict, /analytics
-│   │   ├── core/model_loader.py  # loads artifacts, runs inference + SHAP
-│   │   ├── core/analytics.py     # EDA aggregation for the analytics dashboard
-│   │   └── schemas/schemas.py    # Pydantic request/response models
-│   ├── ml_pipeline/train.py      # full training pipeline (see below)
-│   ├── models/                   # generated artifacts (see below)
-│   ├── data/Thyroid_Diff.csv     # dataset
-│   ├── requirements.txt
-│   └── Dockerfile
-├── docker-compose.yml            # orchestrates both services
-├── docker/                       # reserved for extra deployment config
-└── README.md
-```
 
-## Tech stack
+This can be demonstrated entirely on a local machine. No hosted RAG deployment, paid vector database, paid embedding API, or paid LLM API is required; the trade-off is local disk, RAM, model-download time, and CPU/GPU inference time.
 
-| Layer | Technology |
+## Visual results gallery
+
+The repository also includes reproducible exploratory-analysis outputs from the training workflow. These images make the ML results easier to inspect before running the dashboard or local RAG service.
+
+### Dataset and model analysis
+
+| Target distribution | Age analysis |
 |---|---|
-| Frontend | Next.js 16, TypeScript, Tailwind CSS, shadcn-pattern components (Radix + CVA), Framer Motion, Recharts |
-| Backend | FastAPI (Python), Pydantic v2 |
-| ML | scikit-learn, XGBoost, LightGBM |
-| DL | TensorFlow / Keras |
-| Explainability | SHAP |
+| ![Recurrence target distribution](backend/notebooks/eda_plots/1_target_distribution.png) | ![Age distribution and recurrence analysis](backend/notebooks/eda_plots/2_age_analysis.png) |
 
-## ML pipeline (`backend/ml_pipeline/train.py`)
-
-1. **Data loading** — reads `data/Thyroid_Diff.csv`
-2. **Data validation** — schema/target checks, duplicate + class-balance report
-3. **Missing value handling** — mode/median imputation (dataset has 0 missing values, but the step is real and runs regardless)
-4. **Encoding** — `OneHotEncoder` for the 15 categorical features
-5. **Feature scaling** — `StandardScaler` for `Age`
-6. **Model training** — steps 4–5 are composed in a single `ColumnTransformer` fit inside the pipeline; 7 ML models + 1 DL model trained on the transformed features
-7. **Model evaluation** — 5-fold stratified CV (ROC-AUC) + held-out 20% test set (accuracy, precision, recall, F1, ROC-AUC, confusion matrix, ROC curve)
-8. **Model saving** — best model auto-selected by **ROC-AUC → F1 → Recall**, saved with all preprocessing/metadata needed to serve it
-
-### Models trained
-
-**Machine Learning:** Logistic Regression, Random Forest, SVM (RBF), KNN, Gradient Boosting, XGBoost, LightGBM
-**Deep Learning:** Keras ANN — `Dense(128, relu) → Dropout(0.3) → Dense(64, relu) → Dropout(0.2) → Dense(32, relu) → Dense(1, sigmoid)`, trained with class weights, a validation split, and early stopping on validation AUC.
-
-### Result (this run)
-
-**Random Forest** was selected as the best model — **96.1% test accuracy**, **ROC-AUC ≈ 0.995**. Full comparison table is served live at `/api/model-info` and rendered in the frontend's Model Bench page. Numbers can shift slightly between reruns due to the DL model's stochastic training; the selection logic always re-picks the actual best performer.
-
-### Saved artifacts (`backend/models/`)
-
-| File | Contents |
+| Categorical feature analysis | Correlation heatmap |
 |---|---|
-| `best_model.pkl` | The winning scikit-learn/XGBoost/LightGBM model (or a placeholder if the ANN wins) |
-| `best_model_ann.keras` | Saved Keras model, present only if the ANN was selected |
-| `preprocessing.pkl` | Fitted `ColumnTransformer` (encoding + scaling) |
-| `target_encoder.pkl` | Label encoder for `Recurred` |
-| `metadata.json` | Feature list, categorical options (drives the frontend form), confusion matrix, dataset info |
-| `metrics.json` | Full model comparison + best model metrics |
-| `model_comparison.csv` | Same comparison, CSV form |
-| `roc_curves.json` | FPR/TPR arrays per model, for the ROC chart |
-| `shap_background.pkl` | Background sample used by the SHAP explainer |
-| `encoded_feature_names.json` | Post-one-hot-encoding feature names, for mapping SHAP values back to original fields |
+| ![Categorical feature analysis](backend/notebooks/eda_plots/3_categorical_analysis.png) | ![Feature correlation heatmap](backend/notebooks/eda_plots/4_correlation_heatmap_full.png) |
 
-## Backend API
+| Features correlated with target | Top features by target |
+|---|---|
+| ![Feature correlation with recurrence target](backend/notebooks/eda_plots/5_correlation_with_target.png) | ![Top features by recurrence target](backend/notebooks/eda_plots/6_top_features_by_target.png) |
 
-Base URL: `http://localhost:8000`
+These plots complement the end-to-end screenshots above: the dashboard shows the user-facing result, while the EDA artifacts show how the dataset and predictive signals were inspected during model development.
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/api/health` | Service + best-model status |
-| GET | `/api/features` | Feature list + valid categorical options (drives the form) |
-| GET | `/api/model-info` | Full model comparison table, ROC curves, confusion matrix |
-| GET | `/api/analytics` | EDA aggregates for the analytics dashboard |
-| POST | `/api/predict` | Run a prediction on a patient profile |
+## What is included
 
-### `POST /api/predict`
+- **Prediction dashboard** for patient-profile inference.
+- **Model Bench** comparing Logistic Regression, Random Forest, SVM, KNN, Gradient Boosting, XGBoost, LightGBM, and a Keras ANN.
+- **SHAP explainability** with risk-increasing and risk-decreasing factors.
+- **Analytics dashboard** with recurrence distributions and clinicopathologic breakdowns.
+- **Local RAG** exposed separately through `/api/rag/explain` so RAG failures cannot break `/api/predict`.
+- **No paid AI services:** embeddings, retrieval, vector storage, and generation run locally.
 
-Request:
-```json
-{
-  "Age": 40, "Gender": "F", "Smoking": "No", "Hx Smoking": "No",
-  "Hx Radiothreapy": "No", "Thyroid Function": "Euthyroid",
-  "Physical Examination": "Multinodular goiter", "Adenopathy": "No",
-  "Pathology": "Papillary", "Focality": "Uni-Focal", "Risk": "Low",
-  "T": "T1a", "N": "N0", "M": "M0", "Stage": "I", "Response": "Excellent"
-}
+## Architecture
+
+```text
+Patient profile
+     |
+     +--> /api/predict --> best trained model --> probability + SHAP factors
+                                             |
+                                             v
+                                      /api/rag/explain
+                                             |
+          SHAP-aware query builder --> BM25 + vector retrieval --> RRF --> MMR
+                                                                     |
+                                                                     v
+                                                        Ollama / Qwen 2.5 3B
+                                                                     |
+                                                                     v
+                                               grounded explanation + evidence citations
 ```
 
-Response:
-```json
-{
-  "prediction": "No",
-  "probability": 0.0431,
-  "confidence": "High",
-  "model_used": "Random Forest",
-  "explanation": ["Reduces risk: Response = Excellent", "..."],
-  "shap_factors": [{"feature": "Response", "value": "Excellent", "impact": -0.1442, "direction": "decreases"}],
-  "probabilities": {"No": 0.9569, "Yes": 0.0431}
-}
+### RAG lifecycle
+
+1. Add real, legally accessible medical or educational PDFs under `backend/rag/documents/`.
+2. Extract text with `pypdf`, detect sections heuristically, and create overlapping chunks.
+3. Generate local embeddings with `BAAI/bge-small-en-v1.5` through `sentence-transformers`.
+4. Persist vectors in ChromaDB and lexical terms in a BM25 index.
+5. Build retrieval queries from the prediction and the highest-impact SHAP factors.
+6. Fuse BM25 and vector rankings with reciprocal rank fusion (RRF), then diversify with maximal marginal relevance (MMR).
+7. Ask local Ollama/Qwen to summarize only the retrieved context and return citations plus limitations.
+
+RAG is intentionally additive: `/api/predict` retains its existing contract, while the frontend requests medical context only after a successful prediction.
+
+## Repository layout
+
+```text
+frontend/
+  src/app/                 Next.js pages: /, /predict, /explainability, /models, /analytics
+  src/components/ui/       Radix/CVA shadcn-style components
+  src/lib/                 API client and shared TypeScript types
+backend/
+  app/main.py              FastAPI app and router registration
+  app/routers/api.py       Prediction, model, health, and analytics endpoints
+  app/routers/rag.py       Separate RAG explanation endpoint
+  app/core/model_loader.py Model artifacts, inference, and SHAP
+  app/core/rag_engine.py  Retrieval and local generation orchestration
+  app/core/ollama_client.py Ollama HTTP client
+  app/schemas/             Pydantic API contracts
+  ml_pipeline/train.py    Training, validation, evaluation, and artifact export
+  rag/                     Chunking, embeddings, BM25, Chroma, fusion, ingestion, evaluation
+  data/Thyroid_Diff.csv   UCI differentiated thyroid cancer recurrence data
+  models/                  Generated model and metadata artifacts
+docs/thyroidai-rag-pipeline.png
+
+docker-compose.yml
 ```
 
-Invalid categorical values return `422` with the list of valid options for that field.
+## Technology
 
-## Frontend pages
+| Area | Stack |
+|---|---|
+| Frontend | Next.js 16, TypeScript, Tailwind CSS, Framer Motion, Recharts |
+| Backend | FastAPI, Pydantic v2 |
+| ML/DL | scikit-learn, XGBoost, LightGBM, TensorFlow/Keras |
+| Explainability | SHAP permutation explainer |
+| RAG | pypdf, sentence-transformers, ChromaDB, rank-bm25, manual RRF/MMR |
+| Local generation | Ollama with `qwen2.5:3b` |
 
-- **`/`** — landing page: project intro, AI workflow, dataset info, live model performance summary
-- **`/predict`** — clinical prediction dashboard: dynamic form (built from `/api/features`), animated result card, probability meter, risk badge
-- **`/explainability`** — SHAP dashboard for the most recent prediction: horizontal bar chart of feature contributions, risk-increasing/decreasing factor lists, plain-language patient explanation
-- **`/models`** — model performance dashboard: comparison table, metric bar chart, ROC curves, confusion matrix
-- **`/analytics`** — dataset analytics: target distribution, age histogram, and recurrence-rate breakdowns by gender/risk/stage/response/TNM/smoking/adenopathy/focality/pathology, all as interactive Recharts
+## Quick start
 
-## Running locally (without Docker)
+### 1. Train the prediction models
 
-**Backend:**
 ```bash
 cd backend
+python -m venv .venv
+# macOS/Linux
+source .venv/bin/activate
+# Windows PowerShell: .venv\\Scripts\\Activate.ps1
 pip install -r requirements.txt
-python ml_pipeline/train.py        # trains everything, writes models/
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-py -3.10 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+python ml_pipeline/train.py
 ```
 
-**Frontend** (in a second terminal):
+The training pipeline validates the dataset, imputes missing values, one-hot encodes categorical features, scales `Age`, trains eight candidates, evaluates stratified five-fold CV plus a held-out test split, and selects the winner by ROC-AUC, F1, then recall.
+
+### 2. Start the backend
+
+```bash
+cd backend
+cp .env.example .env
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 3. Start the frontend
+
 ```bash
 cd frontend
 npm install
-npm run build && npm run start     # or `npm run dev` for local development
+npm run dev
 ```
 
-Then open **http://localhost:3000**. Set `NEXT_PUBLIC_API_URL` in
-`frontend/.env.local` if the backend runs somewhere other than
-`http://localhost:8000`.
+Open [http://localhost:3000](http://localhost:3000). The API docs are available at [http://localhost:8000/docs](http://localhost:8000/docs).
 
-## Running with Docker
+Set `NEXT_PUBLIC_API_URL` in `frontend/.env.local` when the backend is not running at `http://localhost:8000`.
+
+## Enable local RAG
+
+Install [Ollama](https://ollama.com/download), then download the local model:
+
+```bash
+ollama pull qwen2.5:3b
+```
+
+Add genuine source PDFs first. See [`backend/rag/documents/README.md`](backend/rag/documents/README.md) for sourcing and folder conventions. The repository deliberately ships no fabricated clinical documents or citations.
+
+```bash
+cd backend
+python -m rag.ingestion            # incremental ingestion
+python -m rag.ingestion --rebuild  # rebuild Chroma and BM25 indexes
+```
+
+Default local configuration is in [`backend/.env.example`](backend/.env.example):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `RAG_ENABLED` | `true` | Enable the RAG route and engine |
+| `RAG_EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Local embedding model |
+| `LLM_PROVIDER` | `ollama` | Local generation provider |
+| `LLM_MODEL` | `qwen2.5:3b` | Ollama model name |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Local Ollama endpoint |
+
+If Ollama is unavailable or the index is empty, the endpoint returns a structured `rag_unavailable` or `no_evidence` response with limitations rather than a server error.
+
+## API contracts
+
+### Prediction
+
+`POST /api/predict`
+
+```json
+{
+  "Age": 40,
+  "Gender": "F",
+  "Smoking": "No",
+  "Hx Smoking": "No",
+  "Hx Radiothreapy": "No",
+  "Thyroid Function": "Euthyroid",
+  "Physical Examination": "Multinodular goiter",
+  "Adenopathy": "No",
+  "Pathology": "Papillary",
+  "Focality": "Uni-Focal",
+  "Risk": "Low",
+  "T": "T1a",
+  "N": "N0",
+  "M": "M0",
+  "Stage": "I",
+  "Response": "Excellent"
+}
+```
+
+The response includes `prediction`, class probabilities, confidence, model name, plain-language explanations, and `shap_factors`.
+
+### RAG explanation
+
+`POST /api/rag/explain`
+
+```json
+{
+  "patient": {"Age": 40, "Pathology": "Papillary", "Risk": "Low", "Stage": "I", "Response": "Excellent"},
+  "prediction": {"prediction": "No", "probability": 0.9569},
+  "shap_factors": [{"feature": "Response", "value": "Excellent", "impact": -0.1442, "direction": "decreases"}]
+}
+```
+
+A successful response contains `status`, `summary`, `clinical_context`, `evidence`, `retrieval_method`, `queries_used`, `limitations`, and a research disclaimer. Retrieval is reported as `BM25 + Vector + RRF + MMR`.
+
+### Other endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/health` | Service and model status |
+| GET | `/api/features` | Form fields and valid categorical values |
+| GET | `/api/model-info` | Model comparison, ROC curves, confusion matrix |
+| GET | `/api/analytics` | Dataset aggregates for the analytics page |
+| GET | `/api/rag/status` | RAG availability and index status |
+
+## Testing and evaluation
+
+Run the retrieval evaluation after adding and labeling documents in `backend/rag/evaluate.py`:
+
+```bash
+cd backend
+python -m rag.evaluate
+```
+
+The evaluator reports **Precision@K**, **Recall@K**, and **MRR** for retrieval. Its default expected-document lists are empty because the project cannot know which real PDFs you will supply; fill them with document identifiers from your own corpus before interpreting the scores.
+
+Recommended smoke tests:
+
+```bash
+curl http://localhost:8000/api/health
+curl http://localhost:8000/api/rag/status
+curl -X POST http://localhost:8000/api/rag/status
+
+# Prediction smoke test; use a complete profile accepted by /api/predict.
+curl -X POST http://localhost:8000/api/predict \
+  -H 'Content-Type: application/json' \
+  -d '{"Age":40,"Gender":"F","Smoking":"No","Hx Smoking":"No","Hx Radiothreapy":"No","Thyroid Function":"Euthyroid","Physical Examination":"Multinodular goiter","Adenopathy":"No","Pathology":"Papillary","Focality":"Uni-Focal","Risk":"Low","T":"T1a","N":"N0","M":"M0","Stage":"I","Response":"Excellent"}'
+```
+
+The generated architecture image above is a visual end-to-end test artifact: it documents the boundary between prediction, SHAP query construction, hybrid retrieval, and local generation.
+
+## Docker
 
 ```bash
 docker compose up --build
 ```
 
-- Frontend: http://localhost:3000
-- Backend: http://localhost:8000 (interactive docs at `/docs`)
+- Frontend: `http://localhost:3000`
+- Backend: `http://localhost:8000`
+- API docs: `http://localhost:8000/docs`
 
-The compose file mounts `backend/models` and `backend/data` as volumes, so you
-can retrain (`python ml_pipeline/train.py`) without rebuilding the image.
+The compose setup persists `backend/models`, `backend/data`, `backend/rag/documents`, and `backend/rag/vectorstore`. Ollama is expected to run on the host or as a separately managed service; the backend container is configured to reach host Ollama through `host.docker.internal`.
 
-## Deployment
+## Retraining and deployment
 
-The images are stateless aside from the mounted `models/`/`data/` folders, so
-they deploy the same way to **Render**, **Railway**, **AWS** (ECS/Fargate or
-App Runner), or **Azure** (Container Apps): push the images, set
-`NEXT_PUBLIC_API_URL` on the frontend service to the backend's public URL, and
-expose ports 3000/8000.
+Replace `backend/data/Thyroid_Diff.csv` with a compatible 17-column dataset and rerun `python ml_pipeline/train.py`. The command regenerates preprocessing, metadata, metrics, ROC curves, and model artifacts; the frontend form derives its categorical options from metadata.
 
-## Retraining on new data
+The frontend and backend are containerized and can be deployed independently to platforms such as Render, Railway, AWS ECS/App Runner, or Azure Container Apps. Set the deployed frontend's `NEXT_PUBLIC_API_URL` to the public FastAPI URL and provide persistent storage for model/RAG artifacts.
 
-Replace `backend/data/Thyroid_Diff.csv` with a new file using the same 17
-columns, then re-run `python ml_pipeline/train.py`. It regenerates every file
-in `backend/models/`, including `metadata.json` (which drives the frontend
-form) — no frontend or API code changes needed.
+## Limitations and responsible use
 
-## Notes & limitations
+- The dataset is small (383 patients), so metrics should not be treated as clinical validation.
+- Results can shift between training runs, particularly for the stochastic ANN.
+- SHAP uses a 50-sample permutation background and is explanatory, not causal.
+- PDF section detection is heuristic and may be less accurate on dense two-column documents.
+- CPU-only local generation can be slow.
+- Evidence quality depends entirely on the PDFs supplied and indexed by the operator.
+- The RAG layer summarizes retrieved context; it does not verify guideline currency or establish treatment recommendations.
+- No authentication is implemented; this is a public demonstration.
 
-- This is a research/educational/portfolio demonstration, **not a certified
-  clinical decision tool**. It is not a substitute for clinical judgment.
-- No authentication is implemented by design — this is a public,
-  no-login AI demonstration.
-- SHAP explanations use a permutation-based `shap.Explainer` over a 50-sample
-  background set for robustness across whichever model type ends up selected
-  as "best" (tree, linear, kernel, or the Keras ANN).
-- Docker builds were authored to standard conventions but could not be
-  executed inside the sandbox used to build this project (no Docker daemon /
-  restricted registry access); please validate `docker compose up --build`
-  in your own environment.
+Use only de-identified data, document sources you are legally permitted to process, and qualified clinical review for any real-world interpretation.
+
+## Dataset attribution
+
+The prediction system uses the UCI **Differentiated Thyroid Cancer Recurrence** dataset by Borzooei and Tarokhian (2023), containing 383 patients and 16 clinicopathologic features. Refer to the dataset license and original publication before redistributing derivative artifacts.
+
+## License and contribution
+
+This repository is intended for research, education, and portfolio demonstration. Before publishing a deployment, review dataset licensing, document redistribution rights, model governance, privacy controls, and your organization’s clinical-safety requirements.
+
+Contributions should preserve the separation between `/api/predict` and `/api/rag/explain`, avoid fabricated evidence, and include reproducible evaluation notes for changes to retrieval or generation.
